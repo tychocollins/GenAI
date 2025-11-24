@@ -27,6 +27,15 @@ This project is currently transitioning from the **Dataset Setup** phase to the 
 git clone [https://github.com/tychocollins/GenAI.git](https://github.com/tychocollins/GenAI.git)
 cd GenAI
 
+```
+
+### Assessment & Metrics (Cesar Cabrera)
+- Added `metrics.py` for Frechet Inception Distance and a quick mode-collapse check.
+- Expect loaders that return `pixel_values` normalized to `[-1, 1]` (see `data_loader.py`).
+- Usage:
+  - `fid_from_loaders(real_loader, fake_loader, device="cuda", max_batches=50)`
+  - `collapse_report(fake_loader, device="cuda", max_batches=50)`
+- A small offline smoke test is included in `metrics.py` under `__main__`.
 
 
 
