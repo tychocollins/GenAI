@@ -35,6 +35,7 @@ cd GenAI
 - Usage:
   - `fid_from_loaders(real_loader, fake_loader, device="cuda", max_batches=50)`
   - `collapse_report(fake_loader, device="cuda", max_batches=50)`
+- To feed Da Marc's dashboard: `compute_and_store_metrics(real_loader, fake_loader, save_path="outputs/logs/metrics.pt")`
 - A small offline smoke test is included in `metrics.py` under `__main__`.
 
 
