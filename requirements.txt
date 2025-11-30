@@ -23,11 +23,31 @@ typing_extensions==4.10.0
 
 # --- Extra Index URL ---
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.0.1+cpu
-torchvision==0.15.2+cpu
 
-streamlit==1.36.0
+# PyTorch (choose a range that worked locally)
+torch>=2.5.0,<2.10.0
+torchvision>=0.15.0
+
+# Imaging / numerical
+Pillow==10.4.0
+numpy==2.2.4
+
+# ML / data
 datasets==4.4.1
-pillow>=10.4.0
+pandas==2.3.3
+scipy==1.13.1
+tqdm==4.67.1
+
+# App / viz
+streamlit==1.36.0
+matplotlib==3.9.0
+altair==5.3.0
+
+# Misc
+packaging
+protobuf
+pyarrow
+pytz
+PyYAML
+typing_extensions==4.10.0
 requests
-numpy>=2.2.4
