@@ -27,7 +27,10 @@ from torchvision.utils import make_grid
 from PIL import Image
 import numpy as np
 from pathlib import Path
+import torch
+import logging
 
+logging.getLogger(__name__).setLevel(logging.INFO)
 
 # Simple DCGAN-like Generator (must match train.py)
 class Generator(nn.Module):
@@ -79,8 +82,10 @@ def _denorm_tensor(img_tensor):
 
 def load_model_from_checkpoint(checkpoint_path, device=None, nz=100):
     """
-    Loads generator from checkpoint saved by train.py (keys: generator_state_dict or whole state_dict).
-    Returns generator (in eval mode) on requested device.
+    Robust loader for Generator:
+    - accepts dicts with "generator_state_dict" or direct state_dict
+    - strips "module." prefix
+    - tries strict=False, then falls back to loading matching keys only
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -88,7 +93,7 @@ def load_model_from_checkpoint(checkpoint_path, device=None, nz=100):
     G = Generator(nz=nz).to(device)
     ckpt = torch.load(checkpoint_path, map_location=device)
 
-    # support both formats: {generator_state_dict: ...} or direct state_dict
+    # extract candidate state_dict
     if isinstance(ckpt, dict) and "generator_state_dict" in ckpt:
         state = ckpt["generator_state_dict"]
     elif isinstance(ckpt, dict) and "state_dict" in ckpt:
@@ -96,18 +101,38 @@ def load_model_from_checkpoint(checkpoint_path, device=None, nz=100):
     else:
         state = ckpt
 
-    try:
-        G.load_state_dict(state)
-    except RuntimeError:
-        # attempt to filter missing prefixes (e.g., "module.")
-        new_state = {}
+    # normalize keys: remove "module." prefix if present
+    norm_state = {}
+    if isinstance(state, dict):
         for k, v in state.items():
             nk = k.replace("module.", "") if k.startswith("module.") else k
-            new_state[nk] = v
-        G.load_state_dict(new_state)
+            norm_state[nk] = v
+    else:
+        raise RuntimeError("Unsupported checkpoint format for generator state.")
 
-    G.eval()
-    return G
+    # try best-effort load with strict=False
+    try:
+        G.load_state_dict(norm_state, strict=False)
+        logging.info("Loaded checkpoint into Generator (strict=False).")
+        return G.eval()
+    except Exception as e:
+        logging.warning("load_state_dict(strict=False) failed: %s", e)
+
+    # fallback: keep only keys that match in name and shape
+    g_state = G.state_dict()
+    filtered = {}
+    for k, v in norm_state.items():
+        if k in g_state and hasattr(v, "shape") and g_state[k].shape == v.shape:
+            filtered[k] = v
+    if not filtered:
+        raise RuntimeError("No compatible parameters found between checkpoint and model.")
+
+    # merge and load
+    merged = {**g_state}
+    merged.update(filtered)
+    G.load_state_dict(merged)
+    logging.info("Loaded matching subset of checkpoint keys into Generator.")
+    return G.eval()
 
 
 def sample_noise(batch_size: int, noise_dim: int, device: torch.device) -> torch.Tensor:
