@@ -30,6 +30,7 @@ from pathlib import Path
 import torch
 import logging
 import sys
+import time
 
 logging.getLogger(__name__).setLevel(logging.INFO)
 
@@ -230,6 +231,42 @@ def generate_from_model(G, num_images=8, nz=100, device=None, seed=None, return_
 
         mn = float(t.min().item())
         mx = float(t.max().item())
+
+        # keep raw output for debug variants
+        raw_out = t.clone()
+
+        # Debug: compute per-channel stats and save different normalization variants
+        try:
+            # per-channel mean/std across batch
+            channel_means = raw_out.view(raw_out.size(0), raw_out.size(1), -1).mean(dim=2).mean(dim=0).tolist()
+            channel_stds = raw_out.view(raw_out.size(0), raw_out.size(1), -1).std(dim=2).mean(dim=0).tolist()
+            logging.info("RAW per-channel mean=%s std=%s", ["%.4f" % m for m in channel_means], ["%.4f" % s for s in channel_stds])
+
+            debug_dir = Path("outputs/debug")
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            ts = int(time.time())
+
+            # Variant A: assume tanh [-1,1]
+            v_tanh = (raw_out + 1.0) / 2.0
+            v_tanh = v_tanh.clamp(0.0, 1.0)
+            save_image(v_tanh, debug_dir / f"debug_{ts}_tanh.png", nrow=int(math.ceil(math.sqrt(v_tanh.size(0)))), normalize=False)
+
+            # Variant B: assume sigmoid [0,1]
+            v_sig = raw_out.clamp(0.0, 1.0)
+            save_image(v_sig, debug_dir / f"debug_{ts}_sigmoid.png", nrow=int(math.ceil(math.sqrt(v_sig.size(0)))), normalize=False)
+
+            # Variant C: min/max per-batch linear rescale to [0,1]
+            rmin = float(raw_out.min().item())
+            rmax = float(raw_out.max().item())
+            if rmax - rmin < 1e-8:
+                v_mm = raw_out * 0.0
+            else:
+                v_mm = (raw_out - rmin) / (rmax - rmin)
+            save_image(v_mm, debug_dir / f"debug_{ts}_minmax.png", nrow=int(math.ceil(math.sqrt(v_mm.size(0)))), normalize=False)
+
+            logging.info("Saved debug variants to %s", debug_dir)
+        except Exception as _e:
+            logging.warning("Debug dump failed: %s", _e)
 
         # Normalize output to approx [-1,1] for downstream consistency
         if mn >= -1.1 and mx <= 1.1:
