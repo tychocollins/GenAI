@@ -1,99 +1,125 @@
 import torch
 import torch.nn as nn
-from pathlib import Path
+import os
+import random
 from PIL import Image
-from torchvision import transforms
+import numpy as np
 
+# --- Configuration (ADJUST THESE TO MATCH YOUR PROJECT) ---
+MODELS_DIR = "models"
+OUTPUTS_DIR = "outputs/generated"
+# Use the name of your actual model file here
+CHECKPOINT_FILENAME = "your_actual_checkpoint.pt" 
+CHECKPOINT_PATH = os.path.join(MODELS_DIR, CHECKPOINT_FILENAME)
+NUM_SAMPLES = 8
+Z_DIM = 512 # Latent space dimension 
+IMAGE_SIZE = 64 # Output image size 
 
-class DemoGenerator(nn.Module):
+# --- The Generator Model (***REPLACE THIS WITH YOUR REAL MODEL CLASS***) ---
+class MyGeneratorModel(nn.Module):
     """
-    Minimal generator stub for demo purposes.
-    Maps noise z -> image tensor in [-1, 1], shape [B, 3, 64, 64].
+    ***PLACEHOLDER: REPLACE THIS ENTIRE CLASS DEFINITION*** ***WITH YOUR ACTUAL PyTorch Generator Model Definition (e.g., GAN or VAE Gen).***
     """
-
-    def __init__(self, noise_dim=128, hidden=256):
+    def __init__(self, z_dim, img_size):
         super().__init__()
-        self.noise_dim = noise_dim
-        self.proj = nn.Sequential(
-            nn.Linear(noise_dim, hidden),
-            nn.SiLU(),
-            nn.Linear(hidden, 3 * 64 * 64),
-            nn.Tanh(),  # keep outputs in [-1, 1]
+        self.img_size = img_size
+        # This placeholder output layer just generates random noise
+        self.output_layer = nn.Sequential(
+            nn.Conv2d(z_dim, 3, 1),
+            nn.Tanh() 
         )
 
     def forward(self, z):
-        return self.generate(z)
-
-    def generate(self, z):
-        out = self.proj(z)
-        out = out.view(z.size(0), 3, 64, 64)
-        return out
+        # Reshape noise tensor for the placeholder model
+        z = z.view(z.size(0), z.size(1), 1, 1).expand(-1, -1, self.img_size, self.img_size)
+        return self.output_layer(z)
 
 
-def create_demo_checkpoint(path="models/ckpt.pt", noise_dim=128):
-    model = DemoGenerator(noise_dim=noise_dim)
-    state = {
-        "model_class": DemoGenerator,
-        "model_args": {"noise_dim": noise_dim, "hidden": 256},
-        "weights": model.state_dict(),
-        "noise_dim": noise_dim,
-    }
-    torch.save(state, path)
+# --- Core Functions ---
 
+def ensure_directories_exist():
+    """Checks for and creates necessary directories (THE FIX for RuntimeError)."""
+    # Create models directory
+    if not os.path.exists(MODELS_DIR):
+        print(f"Creating missing directory: {MODELS_DIR}")
+        os.makedirs(MODELS_DIR)
+    
+    # Create outputs directory
+    if not os.path.exists(OUTPUTS_DIR):
+        print(f"Creating missing directory: {OUTPUTS_DIR}")
+        os.makedirs(OUTPUTS_DIR)
 
-class RealImageGenerator(nn.Module):
+def create_demo_checkpoint():
     """
-    Uses a real image (or mean of a few) as the base output, with small noise.
+    ***ADJUST THIS FUNCTION TO LOAD YOUR REAL, TRAINED MODEL***
+    This function currently creates a DUMMY model and saves a placeholder checkpoint.
     """
-
-    def __init__(self, base_img: torch.Tensor, noise_scale: float = 0.05):
-        super().__init__()
-        # base_img expected shape [3, 64, 64], in [-1, 1]
-        self.register_buffer("base_img", base_img)
-        self.noise_scale = noise_scale
-
-    def generate(self, z):
-        # z: [B, noise_dim]; add light noise to the base image
-        b = z.size(0)
-        noise = torch.randn_like(self.base_img).unsqueeze(0).repeat(b, 1, 1, 1) * self.noise_scale
-        return (self.base_img.unsqueeze(0).repeat(b, 1, 1, 1) + noise).clamp(-1, 1)
-
-
-def _load_mean_image(real_dir: Path, take=32):
-    imgs = []
-    tfm = transforms.Compose(
-        [
-            transforms.Resize((64, 64)),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-        ]
-    )
-    files = [p for p in real_dir.rglob("*") if p.suffix.lower() in {".png", ".jpg", ".jpeg"}]
-    files = files[:take]
-    if not files:
-        raise ValueError(f"No images found under {real_dir}")
-    for p in files:
-        img = Image.open(p).convert("RGB")
-        imgs.append(tfm(img))
-    stack = torch.stack(imgs, dim=0)
-    return stack.mean(dim=0)
-
-
-def create_real_checkpoint(real_dir="outputs/real_images", path="models/ckpt.pt", noise_scale=0.05):
-    real_dir = Path(real_dir)
-    base = _load_mean_image(real_dir)
-    model = RealImageGenerator(base_img=base, noise_scale=noise_scale)
+    print("Preparing model checkpoint...")
+    
+    # 1. Create the necessary directories (The FIX)
+    ensure_directories_exist() 
+    
+    # 2. Instantiate the model
+    # ***Make sure the Z_DIM and IMAGE_SIZE match your real model's requirements***
+    model = MyGeneratorModel(z_dim=Z_DIM, img_size=IMAGE_SIZE)
+    
+    # 3. Save the placeholder checkpoint
     state = {
-        "model_class": RealImageGenerator,
-        "model_args": {"base_img": base, "noise_scale": noise_scale},
-        "weights": model.state_dict(),
-        "noise_dim": 128,
+        'model_state_dict': model.state_dict(),
+        'iteration': 1000,
+        'loss': 0.5
     }
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    torch.save(state, path)
-    print(f"Saved real-image-based checkpoint to {path}")
+    
+    # Only save the checkpoint if a real, trained one is not already present
+    if not os.path.exists(CHECKPOINT_PATH):
+        torch.save(state, CHECKPOINT_PATH)
+        print(f"Placeholder checkpoint saved to: {CHECKPOINT_PATH}")
+    else:
+        print(f"Checkpoint already exists at {CHECKPOINT_PATH}. Loading existing model.")
+        
+    # Load the state dictionary back into the model for use
+    # ***IMPORTANT: You should use your actual model loading/unwrapping logic here***
+    checkpoint = torch.load(CHECKPOINT_PATH, map_location=torch.device('cpu'))
+    model.load_state_dict(checkpoint['model_state_dict'])
+    
+    return model
+
+def generate_and_save_samples(model):
+    """Generates sample images from the model and saves them."""
+    print(f"Generating {NUM_SAMPLES} samples...")
+    
+    # 1. Ensure output directory exists
+    ensure_directories_exist()
+
+    # 2. Generate latent vectors (noise)
+    latent_vectors = torch.randn(NUM_SAMPLES, Z_DIM)
+
+    # 3. Generate images (turn off gradient calculation)
+    with torch.no_grad():
+        model.eval()
+        generated_images = model(latent_vectors)
+
+    # 4. Process and save images
+    for i in range(NUM_SAMPLES):
+        # Convert tensor (C, H, W) to NumPy array (H, W, C)
+        img_tensor = generated_images[i].cpu().numpy().transpose(1, 2, 0)
+        
+        # Denormalize (e.g., from [-1, 1] to [0, 255])
+        img_array = (img_tensor * 127.5 + 127.5).astype(np.uint8)
+        
+        # Save as PIL Image
+        img = Image.fromarray(img_array)
+        output_path = os.path.join(OUTPUTS_DIR, f"face_{i+1}_{random.randint(1000, 9999)}.png")
+        img.save(output_path)
+        print(f"Sample saved to: {output_path}")
+
+    print("Sample generation complete.")
 
 
+# --- Main Execution ---
 if __name__ == "__main__":
-    create_demo_checkpoint()
-    print("Saved demo checkpoint to models/ckpt.pt")
+    # This will now create the 'models' folder if it is missing.
+    model = create_demo_checkpoint()
+    
+    # This will now create the 'outputs/generated' folder if it is missing.
+    generate_and_save_samples(model)
