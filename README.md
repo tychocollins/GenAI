@@ -14,9 +14,9 @@ This project is currently transitioning from the **Dataset Setup** phase to the 
 | :--- | :--- | :--- | :--- |
 | **Dataset and Preprocessing** | **Tycho Collins** | Collect, scale, crop, and normalize the CelebA/FFHQ dataset. | **✅ Completed (Nov 24)** |
 | Model Training Lead | Erick Chavez | Set up and train VAE/DDPM/Flow Matching models; tune hyperparameters. |  **✅ Completed**  |
-| Image Generation Module | John Cosby | Generate faces from latent noise using trained weights. |  **✅ Completed **  |
+| Image Generation Module | John Cosby | Generate faces from latent noise using trained weights. |  **✅ Completed**  |
 | Assessment and Metrics | Cesar Cabrera | Compute FID scores and detect overfitting/mode collapse. | **✅ Completed**  |
-| User Interface & Visualization | Da Marc Henry | Create the dashboard that displays outputs, training graphs, and comparisons. |  **✅ Completed **  |
+| User Interface & Visualization | Da Marc Henry | Create the dashboard that displays outputs, training graphs, and comparisons. |  **✅ Completed**  |
 
 ***
 
