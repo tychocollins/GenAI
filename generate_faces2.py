@@ -21,13 +21,42 @@
 import argparse
 import math
 import os
+import torch
+import torch.nn as nn
+from torchvision.utils import make_grid
+from PIL import Image
+import numpy as np
 from pathlib import Path
 
-import torch
-from torchvision.utils import save_image
 
+# Simple DCGAN-like Generator (must match train.py)
+class Generator(nn.Module):
+    def __init__(self, nz=100, ngf=64, nc=3):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.ConvTranspose2d(nz, ngf * 8, 4, 1, 0, bias=False),
+            nn.BatchNorm2d(ngf * 8),
+            nn.ReLU(True),
 
-# ---- Helpers ---------------------------------------------------------------
+            nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 4),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 2),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),
+            nn.Tanh()
+        )
+
+    def forward(self, z):
+        return self.net(z)
+
 
 def _pick_device(force_cpu: bool = False) -> torch.device:
     """Selects CUDA if available, otherwise CPU, unless CPU is forced."""
@@ -36,45 +65,49 @@ def _pick_device(force_cpu: bool = False) -> torch.device:
     return torch.device("cuda")
 
 
-def load_model_from_checkpoint(checkpoint_path: Path, device: torch.device):
+def _denorm_tensor(img_tensor):
+    # img_tensor: CxHxW or BxCxHxW in [-1,1] -> uint8 HxWxC
+    img = (img_tensor + 1.0) / 2.0  # [0,1]
+    img = img.clamp(0, 1)
+    img = (img * 255).to(torch.uint8).cpu().numpy()
+    if img.ndim == 3:
+        img = np.transpose(img, (1, 2, 0))  # C,H,W -> H,W,C
+    else:
+        img = np.transpose(img, (0, 2, 3, 1))  # B,C,H,W -> B,H,W,C
+    return img
+
+
+def load_model_from_checkpoint(checkpoint_path, device=None, nz=100):
     """
-    Load a trained model from a checkpoint.
-
-    Expected checkpoint format (set by Erick's training code):
-        {
-            "model_class": <class reference>,
-            "model_args":  { ... kwargs ... },
-            "weights":     <state_dict>,
-            # optional: "noise_dim": int, "epoch": int, ...
-        }
-
-    The model_class must implement:
-        model = model_class(**model_args)
-        out = model.generate(noise)  # returns images in [-1, 1]
+    Loads generator from checkpoint saved by train.py (keys: generator_state_dict or whole state_dict).
+    Returns generator (in eval mode) on requested device.
     """
-    # PyTorch 2.6 defaults weights_only=True; we need full objects for DemoGenerator
-    state = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    if not all(k in state for k in ["model_class", "model_args", "weights"]):
-        raise KeyError(
-            "Checkpoint is missing one of the required keys: "
-            "'model_class', 'model_args', 'weights'."
-        )
+    G = Generator(nz=nz).to(device)
+    ckpt = torch.load(checkpoint_path, map_location=device)
 
-    model_class = state["model_class"]
-    model_args = state["model_args"]
-    weights = state["weights"]
+    # support both formats: {generator_state_dict: ...} or direct state_dict
+    if isinstance(ckpt, dict) and "generator_state_dict" in ckpt:
+        state = ckpt["generator_state_dict"]
+    elif isinstance(ckpt, dict) and "state_dict" in ckpt:
+        state = ckpt["state_dict"]
+    else:
+        state = ckpt
 
-    model = model_class(**model_args)
-    model.load_state_dict(weights)
-    model.to(device)
-    model.eval()
+    try:
+        G.load_state_dict(state)
+    except RuntimeError:
+        # attempt to filter missing prefixes (e.g., "module.")
+        new_state = {}
+        for k, v in state.items():
+            nk = k.replace("module.", "") if k.startswith("module.") else k
+            new_state[nk] = v
+        G.load_state_dict(new_state)
 
-    # Optional: if Erick stores noise_dim in the checkpoint,
-    # we can pull it out here; but we also accept a CLI override.
-    noise_dim = state.get("noise_dim", None)
-
-    return model, noise_dim
+    G.eval()
+    return G
 
 
 def sample_noise(batch_size: int, noise_dim: int, device: torch.device) -> torch.Tensor:
@@ -82,22 +115,23 @@ def sample_noise(batch_size: int, noise_dim: int, device: torch.device) -> torch
     return torch.randn(batch_size, noise_dim, device=device)
 
 
-def generate_from_model(model, num_samples: int, noise_dim: int, device: torch.device) -> torch.Tensor:
+def generate_from_model(G, num_images=8, nz=100, device=None, seed=None):
     """
-    Generate a batch of images using the model's .generate() method.
+    Generate num_images PIL images from G.
+    Returns list of PIL.Image objects (RGB).
+    """
+    if device is None:
+        device = next(G.parameters()).device
 
-    The model is expected to output images in [-1, 1] with shape [B, 3, H, W].
-    """
-    noise = sample_noise(num_samples, noise_dim, device=device)
+    if seed is not None:
+        torch.manual_seed(seed)
+
     with torch.no_grad():
-        out = model.generate(noise)
-
-    if out.ndim != 4 or out.shape[1] != 3:
-        raise ValueError(
-            f"Expected output shape [B, 3, H, W], got {tuple(out.shape)} instead."
-        )
-
-    return out
+        z = torch.randn(num_images, nz, 1, 1, device=device)
+        imgs = G(z)  # BxCxHxW in [-1,1]
+    arr = _denorm_tensor(imgs)  # B,H,W,C uint8
+    pil_images = [Image.fromarray(arr[i]) for i in range(arr.shape[0])]
+    return pil_images
 
 
 def denormalize_to_unit_range(imgs: torch.Tensor) -> torch.Tensor:
@@ -211,5 +245,6 @@ def main():
     print("[SUCCESS] Image generation complete.")
 
 
+# move any demo / script-level code into a guard (see data_loader patch below)
 if __name__ == "__main__":
     main()
