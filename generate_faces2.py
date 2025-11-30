@@ -166,8 +166,10 @@ def _robust_denorm_to_uint8(imgs: torch.Tensor) -> np.ndarray:
 
 def generate_from_model(G, num_images=8, nz=100, device=None, seed=None):
     """
-    Generate num_images PIL images from G.
-    Returns list of PIL.Image objects (RGB).
+    Generate num_images images from G and return a torch.Tensor BxCxHxW (float32, range approx [-1,1]).
+    Heuristics:
+      - Try conv-style z (B,nz,1,1). If output looks degenerate, retry with dense z (B,nz).
+      - Ensure model in eval() and on correct device.
     """
     if device is None:
         device = next(G.parameters()).device
@@ -175,22 +177,84 @@ def generate_from_model(G, num_images=8, nz=100, device=None, seed=None):
     if seed is not None:
         torch.manual_seed(seed)
 
+    G.eval()
     with torch.no_grad():
-        # support both dense z ([B,nz]) and conv z ([B,nz,1,1])
-        z = torch.randn(num_images, nz, 1, 1, device=device)
-        imgs = G(z)  # expected BxCxHxW
-    # debug: log tensor stats before converting
-    try:
-        logging.info("Generator output: shape=%s dtype=%s min=%.4f max=%.4f",
-                     tuple(imgs.shape), str(imgs.dtype), float(imgs.min()), float(imgs.max()))
-    except Exception:
-        logging.info("Generator output logging failed.")
+        B = int(num_images)
+        # try conv z first (common for DCGAN-style generators)
+        z_conv = torch.randn(B, nz, 1, 1, device=device)
+        out = None
+        try:
+            out = G(z_conv)
+        except Exception as e:
+            logging.info("Generator rejected conv-z shape: %s. Will try dense-z. Err: %s", z_conv.shape, e)
 
-    arr = _robust_denorm_to_uint8(imgs)  # B,H,W,3 uint8
-    pil_images = [Image.fromarray(arr[i]) for i in range(arr.shape[0])]
-    return pil_images
+        # if conv attempt failed or produced unexpected shape, try dense z
+        if out is None or (isinstance(out, torch.Tensor) and out.dim() == 2):
+            z_dense = torch.randn(B, nz, device=device)
+            try:
+                out = G(z_dense)
+            except Exception as e:
+                logging.error("Generator failed for dense z too: %s", e)
+                raise
 
+        if not isinstance(out, torch.Tensor):
+            raise TypeError("Generator did not return a torch.Tensor. Got: %s" % type(out))
 
+        # ensure shape is BxCxHxW
+        if out.dim() == 4:
+            imgs = out
+        elif out.dim() == 3:
+            # maybe returned CxHxW for single sample
+            imgs = out.unsqueeze(0)
+        else:
+            raise RuntimeError(f"Unexpected generator output shape: {tuple(out.shape)}")
+
+        # move to CPU for inspection but keep a float copy for downstream
+        t = imgs.detach().cpu().float()
+        B2, C, H, W = t.shape
+        logging.info("Generator raw output shape=%s dtype=%s min=%.4f max=%.4f",
+                     tuple(t.shape), str(t.dtype), float(t.min()), float(t.max()))
+
+        # if single-channel, expand to 3 channels
+        if C == 1:
+            logging.info("Generator returned single channel; repeating to RGB.")
+            t = t.repeat(1, 3, 1, 1)
+            C = 3
+        elif C == 4:
+            logging.info("Generator returned 4 channels; dropping alpha.")
+            t = t[:, :3, :, :]
+            C = 3
+
+        mn = float(t.min().item())
+        mx = float(t.max().item())
+
+        # Normalize output to approx [-1,1] for downstream consistency
+        if mn >= -1.1 and mx <= 1.1:
+            # already approx [-1,1]
+            out_t = t
+            logging.info("Assuming generator outputs in [-1,1].")
+        elif mn >= -0.01 and mx <= 1.01:
+            # [0,1] -> [-1,1]
+            out_t = (t * 2.0) - 1.0
+            logging.info("Assuming generator outputs in [0,1], converting to [-1,1].")
+        elif mn >= 0.0 and mx > 1.0 and mx <= 255.0:
+            # 0..255 -> [-1,1]
+            out_t = (t / 255.0) * 2.0 - 1.0
+            logging.info("Assuming generator outputs in [0,255], converting to [-1,1].")
+        else:
+            # fallback linear rescale to [-1,1]
+            logging.warning("Generator output had unexpected range (min=%f max=%f). Linearly rescaling to [-1,1].", mn, mx)
+            out_t = (t - mn) / (mx - mn + 1e-8)  # [0,1]
+            out_t = out_t * 2.0 - 1.0
+
+        # quick sanity: check per-image variance; if extremely low, warn
+        per_img_std = out_t.view(out_t.size(0), -1).std(dim=1)
+        for i, s in enumerate(per_img_std.tolist()):
+            if s < 1e-3:
+                logging.warning("Generated image %d has very low std=%.6f -> likely degenerate.", i, s)
+
+        # return tensor on CPU (float32) in range [-1,1]
+        return out_t.to(torch.float32)
 def denormalize_to_unit_range(imgs: torch.Tensor) -> torch.Tensor:
     """
     Convert from [-1, 1] to [0, 1] and clamp.
