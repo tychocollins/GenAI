@@ -33,65 +33,60 @@ import logging
 logging.getLogger(__name__).setLevel(logging.INFO)
 
 def _looks_like_state_dict(d: dict) -> bool:
-    # heuristic: many keys and values are tensors / numpy arrays
     if not isinstance(d, dict) or len(d) == 0:
         return False
     sample = list(d.values())[:8]
     return all(hasattr(v, "shape") for v in sample if not isinstance(v, (int, float, str, bytes)))
 
+def _extract_state_dict(ckpt: dict):
+    # common candidate keys
+    for key in ("generator_state_dict", "model_state_dict", "state_dict", "netG", "net", "model"):
+        if key in ckpt and isinstance(ckpt[key], dict):
+            cand = ckpt[key]
+            # sometimes the nested dict itself wraps the real state under another key
+            if any(k in cand for k in ("state_dict", "model_state_dict", "net", "generator_state_dict")):
+                return _extract_state_dict(cand)
+            return cand
+    # otherwise look for any nested dict that looks like a state_dict
+    for v in ckpt.values():
+        if isinstance(v, dict) and _looks_like_state_dict(v):
+            return v
+    # fallback: if the top-level looks like a state_dict, return it
+    if _looks_like_state_dict(ckpt):
+        return ckpt
+    return None
+
 def load_model_from_checkpoint(checkpoint_path, device=None, nz=100):
-    """
-    Robust loader:
-    - finds nested state dicts under common keys
-    - strips 'module.' prefixes
-    - tries strict=False, then falls back to loading matching param keys by name+shape
-    """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     G = Generator(nz=nz).to(device)
     ckpt = torch.load(checkpoint_path, map_location=device)
 
-    # collect candidate state dicts
-    candidates = []
-    if isinstance(ckpt, dict):
-        for key in ("generator_state_dict", "model_state_dict", "state_dict", "model", "netG"):
-            if key in ckpt and isinstance(ckpt[key], dict):
-                candidates.append(ckpt[key])
-        # also look for any dict-valued entry that resembles a state_dict
-        for v in ckpt.values():
-            if isinstance(v, dict) and _looks_like_state_dict(v):
-                candidates.append(v)
-    else:
-        candidates.append(ckpt)
-
-    # pick first plausible candidate
     state = None
-    for cand in candidates:
-        if isinstance(cand, dict):
-            state = cand
-            break
-    if state is None:
-        raise RuntimeError(f"No valid state_dict found in checkpoint: {checkpoint_path}")
+    if isinstance(ckpt, dict):
+        state = _extract_state_dict(ckpt)
+    else:
+        state = ckpt
 
-    # normalize keys (remove 'module.' or 'net.' prefixes if present)
+    if state is None:
+        raise RuntimeError(f"No valid state_dict found in checkpoint: {checkpoint_path}. Top keys: {list(ckpt.keys()) if isinstance(ckpt, dict) else type(ckpt)}")
+
+    # normalize keys (remove "module." prefix)
     norm_state = {}
     for k, v in state.items():
-        nk = k
-        if k.startswith("module."):
-            nk = k[len("module."):]
-        # some checkpoints from other code use "net.[...]" vs "net.[...]" -> keep as-is
+        nk = k[len("module."):] if k.startswith("module.") else k
         norm_state[nk] = v
 
-    # attempt best-effort load
+    # try best-effort load
     try:
         G.load_state_dict(norm_state, strict=False)
-        logging.info("Loaded checkpoint into Generator (strict=False).")
+        logging.info("Loaded checkpoint into Generator with strict=False.")
         return G.eval()
     except Exception as e:
         logging.warning("load_state_dict(strict=False) failed: %s", e)
 
-    # fallback: only keep keys that match in name and shape
+    # fallback: load only matching keys by name+shape
     g_state = G.state_dict()
     filtered = {}
     for k, v in norm_state.items():
@@ -99,11 +94,8 @@ def load_model_from_checkpoint(checkpoint_path, device=None, nz=100):
             filtered[k] = v
 
     if not filtered:
-        # helpful debug: list top-level keys found
-        raise RuntimeError(f"No compatible parameter keys found between checkpoint and model. "
-                           f"Checkpoint top keys: {list(state.keys())[:30]}")
+        raise RuntimeError(f"No compatible parameter keys found between checkpoint and model. Checkpoint top keys: {list(state.keys())[:40]}")
 
-    # merge and load
     merged = {**g_state}
     merged.update(filtered)
     G.load_state_dict(merged)
