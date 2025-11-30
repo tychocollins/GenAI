@@ -23,7 +23,7 @@ import math
 import os
 import torch
 import torch.nn as nn
-from torchvision.utils import make_grid
+from torchvision.utils import make_grid, save_image
 from PIL import Image
 import numpy as np
 from pathlib import Path
@@ -125,6 +125,23 @@ def generate_from_model(G, num_images=8, nz=100, device=None, seed=None):
     arr = _denorm_tensor(imgs)  # B,H,W,C uint8
     pil_images = [Image.fromarray(arr[i]) for i in range(arr.shape[0])]
     return pil_images
+
+
+def _denorm_tensor(imgs: torch.Tensor) -> np.ndarray:
+    """
+    Convert a batch tensor in shape (B, C, H, W) with values in [-1, 1]
+    to a numpy array of shape (B, H, W, C) dtype=uint8 with values 0..255.
+    """
+    if not isinstance(imgs, torch.Tensor):
+        raise TypeError("_denorm_tensor expects a torch.Tensor")
+    # [-1,1] -> [0,1]
+    imgs = (imgs + 1.0) / 2.0
+    imgs = imgs.clamp(0.0, 1.0)
+    # to uint8 0..255
+    imgs = (imgs * 255.0).round().to(torch.uint8)
+    # move channels last and copy to CPU numpy
+    arr = imgs.permute(0, 2, 3, 1).cpu().numpy()
+    return arr
 
 
 def denormalize_to_unit_range(imgs: torch.Tensor) -> torch.Tensor:
