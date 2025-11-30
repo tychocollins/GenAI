@@ -4,16 +4,25 @@ import streamlit as st
 import os
 import torch
 from generate_faces2 import load_model_from_checkpoint, generate_from_model
+import os
+from pathlib import Path
 
 st.set_page_config(page_title="GAN Face Generator", layout="wide")
 
-MODEL_PATH = os.path.join("models", "latest_checkpoint.pt")
+def find_checkpoint(models_dir="models"):
+    p = Path(models_dir)
+    if not p.exists():
+        return None
+    pts = sorted(p.glob("*.pt"), key=lambda x: x.stat().st_mtime, reverse=True)
+    return str(pts[0]) if pts else None
+
+MODEL_PATH = find_checkpoint("models")
 NZ = 100
 
 @st.cache_resource
 def load_generator():
-    if not os.path.exists(MODEL_PATH):
-        st.warning(f"Checkpoint not found at {MODEL_PATH}. Run train.py first or point MODEL_PATH to a valid checkpoint.")
+    if not MODEL_PATH or not os.path.exists(MODEL_PATH):
+        st.warning(f"Checkpoint not found in models/. Run train.py first or point MODEL_PATH to a valid checkpoint.")
         return None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     G = load_model_from_checkpoint(MODEL_PATH, device=device, nz=NZ)
