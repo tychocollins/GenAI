@@ -32,60 +32,19 @@ import logging
 
 logging.getLogger(__name__).setLevel(logging.INFO)
 
-# Simple DCGAN-like Generator (must match train.py)
-class Generator(nn.Module):
-    def __init__(self, nz=100, ngf=64, nc=3):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.ConvTranspose2d(nz, ngf * 8, 4, 1, 0, bias=False),
-            nn.BatchNorm2d(ngf * 8),
-            nn.ReLU(True),
-
-            nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ngf * 4),
-            nn.ReLU(True),
-
-            nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ngf * 2),
-            nn.ReLU(True),
-
-            nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ngf),
-            nn.ReLU(True),
-
-            nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),
-            nn.Tanh()
-        )
-
-    def forward(self, z):
-        return self.net(z)
-
-
-def _pick_device(force_cpu: bool = False) -> torch.device:
-    """Selects CUDA if available, otherwise CPU, unless CPU is forced."""
-    if force_cpu or not torch.cuda.is_available():
-        return torch.device("cpu")
-    return torch.device("cuda")
-
-
-def _denorm_tensor(img_tensor):
-    # img_tensor: CxHxW or BxCxHxW in [-1,1] -> uint8 HxWxC
-    img = (img_tensor + 1.0) / 2.0  # [0,1]
-    img = img.clamp(0, 1)
-    img = (img * 255).to(torch.uint8).cpu().numpy()
-    if img.ndim == 3:
-        img = np.transpose(img, (1, 2, 0))  # C,H,W -> H,W,C
-    else:
-        img = np.transpose(img, (0, 2, 3, 1))  # B,C,H,W -> B,H,W,C
-    return img
-
+def _looks_like_state_dict(d: dict) -> bool:
+    # heuristic: many keys and values are tensors / numpy arrays
+    if not isinstance(d, dict) or len(d) == 0:
+        return False
+    sample = list(d.values())[:8]
+    return all(hasattr(v, "shape") for v in sample if not isinstance(v, (int, float, str, bytes)))
 
 def load_model_from_checkpoint(checkpoint_path, device=None, nz=100):
     """
-    Robust loader for Generator:
-    - accepts dicts with "generator_state_dict" or direct state_dict
-    - strips "module." prefix
-    - tries strict=False, then falls back to loading matching keys only
+    Robust loader:
+    - finds nested state dicts under common keys
+    - strips 'module.' prefixes
+    - tries strict=False, then falls back to loading matching param keys by name+shape
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -93,24 +52,38 @@ def load_model_from_checkpoint(checkpoint_path, device=None, nz=100):
     G = Generator(nz=nz).to(device)
     ckpt = torch.load(checkpoint_path, map_location=device)
 
-    # extract candidate state_dict
-    if isinstance(ckpt, dict) and "generator_state_dict" in ckpt:
-        state = ckpt["generator_state_dict"]
-    elif isinstance(ckpt, dict) and "state_dict" in ckpt:
-        state = ckpt["state_dict"]
+    # collect candidate state dicts
+    candidates = []
+    if isinstance(ckpt, dict):
+        for key in ("generator_state_dict", "model_state_dict", "state_dict", "model", "netG"):
+            if key in ckpt and isinstance(ckpt[key], dict):
+                candidates.append(ckpt[key])
+        # also look for any dict-valued entry that resembles a state_dict
+        for v in ckpt.values():
+            if isinstance(v, dict) and _looks_like_state_dict(v):
+                candidates.append(v)
     else:
-        state = ckpt
+        candidates.append(ckpt)
 
-    # normalize keys: remove "module." prefix if present
+    # pick first plausible candidate
+    state = None
+    for cand in candidates:
+        if isinstance(cand, dict):
+            state = cand
+            break
+    if state is None:
+        raise RuntimeError(f"No valid state_dict found in checkpoint: {checkpoint_path}")
+
+    # normalize keys (remove 'module.' or 'net.' prefixes if present)
     norm_state = {}
-    if isinstance(state, dict):
-        for k, v in state.items():
-            nk = k.replace("module.", "") if k.startswith("module.") else k
-            norm_state[nk] = v
-    else:
-        raise RuntimeError("Unsupported checkpoint format for generator state.")
+    for k, v in state.items():
+        nk = k
+        if k.startswith("module."):
+            nk = k[len("module."):]
+        # some checkpoints from other code use "net.[...]" vs "net.[...]" -> keep as-is
+        norm_state[nk] = v
 
-    # try best-effort load with strict=False
+    # attempt best-effort load
     try:
         G.load_state_dict(norm_state, strict=False)
         logging.info("Loaded checkpoint into Generator (strict=False).")
@@ -118,14 +91,17 @@ def load_model_from_checkpoint(checkpoint_path, device=None, nz=100):
     except Exception as e:
         logging.warning("load_state_dict(strict=False) failed: %s", e)
 
-    # fallback: keep only keys that match in name and shape
+    # fallback: only keep keys that match in name and shape
     g_state = G.state_dict()
     filtered = {}
     for k, v in norm_state.items():
         if k in g_state and hasattr(v, "shape") and g_state[k].shape == v.shape:
             filtered[k] = v
+
     if not filtered:
-        raise RuntimeError("No compatible parameters found between checkpoint and model.")
+        # helpful debug: list top-level keys found
+        raise RuntimeError(f"No compatible parameter keys found between checkpoint and model. "
+                           f"Checkpoint top keys: {list(state.keys())[:30]}")
 
     # merge and load
     merged = {**g_state}

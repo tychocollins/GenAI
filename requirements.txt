@@ -30,3 +30,4 @@ streamlit==1.36.0
 datasets==4.4.1
 pillow>=10.4.0
 requests
+numpy>=2.2.4
