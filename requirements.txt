@@ -23,10 +23,10 @@ typing_extensions==4.10.0
 
 # --- Extra Index URL ---
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.9.1
-torchvision==0.15.2
+torch==2.9.1+cpu
+torchvision==0.15.2+cpu
 
-streamlit
-datasets
-pillow>=10.0.0
+streamlit==1.36.0
+datasets==4.4.1
+pillow>=10.4.0
 requests
