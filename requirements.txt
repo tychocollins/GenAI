@@ -1,9 +1,10 @@
-# --- Core Deep Learning & Imaging (FIXED FOR COMPATIBILITY) ---
-torch==2.3.1                 
-torchvision==0.18.1          
+# --- Core Deep Learning & Imaging (FINAL FIX) ---
+torch==2.5.0                 # CHANGED: Compatible version for Py3.13
+torchvision==0.20.0          # CHANGED: Paired version for torch==2.5.0
 Pillow==10.3.0               
 numpy==2.3.4                 
 
+# ... (keep the rest of the list the same)
 # --- Data Loading, Handling, and Utilities ---
 datasets==4.4.1      
 pandas==2.3.3        
@@ -21,4 +22,4 @@ protobuf
 pyarrow
 pytz
 PyYAML
-typing_extensions==4.10.0 # Added a version for explicit safety
+typing_extensions==4.10.0
