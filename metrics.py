@@ -16,11 +16,12 @@ def _pick_device(device):
 def _build_inception(device):
     model = inception_v3(
         weights=Inception_V3_Weights.IMAGENET1K_V1,
-        aux_logits=False,
+        aux_logits=True,  # required by builder; we strip head below
         transform_input=False,
     )
     model.fc = torch.nn.Identity()
     model.dropout = torch.nn.Identity()
+    model.AuxLogits = torch.nn.Identity()  # remove aux head
     model.to(device)
     model.eval()
     return model

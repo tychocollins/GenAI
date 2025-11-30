@@ -36,7 +36,11 @@ cd GenAI
   - `fid_from_loaders(real_loader, fake_loader, device="cuda", max_batches=50)`
   - `collapse_report(fake_loader, device="cuda", max_batches=50)`
 - To feed Da Marc's dashboard: `compute_and_store_metrics(real_loader, fake_loader, save_path="outputs/logs/metrics.pt")`
+- CLI helper: `python metrics_runner.py --real_dir <path_to_real_images> --fake_dir <path_to_generated_images>` (falls back to synthetic noise if dirs are omitted).
 - A small offline smoke test is included in `metrics.py` under `__main__`.
+
+### Quick Demo (no checkpoints needed)
+- `python demo_bootstrap.py` seeds `outputs/generated/`, `outputs/logs/training_log.pt`, and `outputs/logs/metrics.pt` with synthetic data so `python dashboard.py` can run end-to-end.
 
 
 
