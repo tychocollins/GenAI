@@ -1,0 +1,7 @@
+# Local artifacts and datasets (keep repo clean)
+__pycache__/
+*.pyc
+outputs/
+data/
+models/
+*.pt
