@@ -52,7 +52,8 @@ def load_model_from_checkpoint(checkpoint_path: Path, device: torch.device):
         model = model_class(**model_args)
         out = model.generate(noise)  # returns images in [-1, 1]
     """
-    state = torch.load(checkpoint_path, map_location=device)
+    # PyTorch 2.6 defaults weights_only=True; we need full objects for DemoGenerator
+    state = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
     if not all(k in state for k in ["model_class", "model_args", "weights"]):
         raise KeyError(

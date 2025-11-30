@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from pathlib import Path
 from torch.utils.data import DataLoader, Dataset
 from torchvision.models import inception_v3, Inception_V3_Weights
 
@@ -15,11 +16,12 @@ def _pick_device(device):
 def _build_inception(device):
     model = inception_v3(
         weights=Inception_V3_Weights.IMAGENET1K_V1,
-        aux_logits=False,
+        aux_logits=True,  # required by builder; we strip head below
         transform_input=False,
     )
     model.fc = torch.nn.Identity()
     model.dropout = torch.nn.Identity()
+    model.AuxLogits = torch.nn.Identity()  # remove aux head
     model.to(device)
     model.eval()
     return model
@@ -120,6 +122,26 @@ def collapse_report(fake_loader, device=None, max_batches=None):
         "mean_pairwise_distance": mean_dist,
         "possible_collapse": flag,
     }
+
+
+def compute_and_store_metrics(real_loader, fake_loader, save_path="outputs/logs/metrics.pt", device=None, max_batches=None):
+    """
+    Computes FID and collapse signal, then stores them for the dashboard.
+    Saves a dict with keys: 'fid', 'collapse', 'collapse_detail'.
+    """
+    fid_val = fid_from_loaders(real_loader, fake_loader, device=device, max_batches=max_batches)
+    collapse = collapse_report(fake_loader, device=device, max_batches=max_batches)
+
+    metrics = {
+        "fid": fid_val,
+        "collapse": collapse["possible_collapse"],
+        "collapse_detail": collapse,
+    }
+
+    path = Path(save_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(metrics, path)
+    return metrics
 
 
 class _NoiseImages(Dataset):
