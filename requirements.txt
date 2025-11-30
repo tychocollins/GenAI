@@ -20,3 +20,13 @@ pyarrow
 pytz
 PyYAML
 typing_extensions==4.10.0
+
+# --- Extra Index URL ---
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.9.1
+torchvision==0.15.2
+
+streamlit
+datasets
+pillow
+requests
