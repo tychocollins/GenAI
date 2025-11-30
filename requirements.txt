@@ -1,72 +1,37 @@
-aiohappyeyeballs==2.6.1
+# --- Core Deep Learning & Imaging ---
+# Note: Using torch stable versions from your original list
+torch==2.5.1
+torchvision==0.20.1
+
+# --- Data Loading, Handling, and Utilities ---
+datasets==4.4.1      # Used in dataloader.py for CelebA streaming
+pandas==2.3.3        # Used/imported for data handling
+numpy==2.3.4         # Core numerical library
+Pillow==10.3.0       # Used by PIL and torchvision
+scipy==1.13.1        # Needed for FID calculations (often a dependency of torch/numpy)
+tqdm==4.67.1         # Progress bars
+
+# --- Dashboard & Web Framework ---
+streamlit==1.35.0    # The main web framework
+matplotlib==3.9.0    # Used by dashboard.py for plotting
+# Note: Altair is included if the dashboard uses it, but we use the package name instead of the local path
+altair==5.3.0        # (Based on the error line)
+
+# --- HTTP/API Dependencies (Required by Hugging Face/datasets) ---
 aiohttp==3.13.2
 aiosignal==1.4.0
-altair @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_7ew3pavrjt/croot/altair_1743016738697/work
-anyio==4.11.0
-attrs @ file:///opt/miniconda3/conda-bld/attrs_1762356972456/work
-blinker @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_11lor_igbs/croot/blinker_1737449046432/work
-Bottleneck @ file:///opt/miniconda3/conda-bld/bottleneck_1761937851559/work
-brotlicffi @ file:///opt/miniconda3/conda-bld/brotlicffi_1762950225537/work
-cachetools @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_4dwsj6_xj_/croot/cachetools_1738225342715/work
-certifi @ file:///opt/miniconda3/conda-bld/certifi_1763135328017/work/certifi
-cffi @ file:///opt/miniconda3/conda-bld/cffi_1761832774705/work
-charset-normalizer @ file:///opt/miniconda3/conda-bld/charset-normalizer_1761744820108/work
-click @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_2bwamfk1ra/croot/click_1754477943404/work
-datasets==4.4.1
-dill==0.4.0
-filelock @ file:///opt/miniconda3/conda-bld/filelock_1762419674411/work
 frozenlist==1.8.0
-fsspec==2025.10.0
-gitdb @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_82snifofrq/croot/gitdb_1753362128356/work
-GitPython @ file:///opt/miniconda3/conda-bld/gitpython_1761291256693/work
-gmpy2 @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_51391juwln/croot/gmpy2_1738085477864/work
-h11==0.16.0
-hf-xet==1.2.0
+yarl==1.22.0
+huggingface_hub==1.1.5
 httpcore==1.0.9
 httpx==0.28.1
-huggingface_hub==1.1.5
-idna @ file:///opt/miniconda3/conda-bld/idna_1761912005314/work
-Jinja2 @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_2cnn4kenrm/croot/jinja2_1741710859444/work
-jsonschema @ file:///opt/miniconda3/conda-bld/jsonschema_1762459087465/work
-jsonschema-specifications @ file:///opt/miniconda3/conda-bld/jsonschema-specifications_1762788416887/work
-MarkupSafe @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_1f_uj4vxik/croot/markupsafe_1738584045311/work
-mpmath @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_17iu6a8a3m/croot/mpmath_1690848269369/work
-multidict==6.7.0
-multiprocess==0.70.18
-narwhals @ file:///opt/miniconda3/conda-bld/narwhals_1760003497039/work
-networkx @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_132pvu0cyh/croot/networkx_1756709286477/work
-numexpr @ file:///opt/miniconda3/conda-bld/numexpr_1762165519324/work
-numpy @ file:///opt/miniconda3/conda-bld/numpy_and_numpy_base_1762528496274/work/dist/numpy-2.3.4-cp311-cp311-macosx_12_0_arm64.whl#sha256=0a2b103b89c29fb13f6cfa1b0b4c69aa148f14f86d337750cd91f18b8e073925
-packaging @ file:///opt/miniconda3/conda-bld/packaging_1761049079066/work
-pandas @ file:///opt/miniconda3/conda-bld/pandas_1762332181524/work/dist/pandas-2.3.3-cp311-cp311-macosx_12_0_arm64.whl#sha256=202df5d53c23cfef62978a56a6ba62db241b6257dcda7ff087a13319aa75ac1f
-pillow @ file:///opt/miniconda3/conda-bld/pillow_1762528235719/work
-propcache==0.4.1
-protobuf @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_73kluigbu7/croot/protobuf_1742426204819/work/bazel-bin/python/dist/protobuf-5.29.3-cp311-abi3-macosx_11_0_arm64.whl#sha256=7f2268c0a94e1fc41b30b25a8d5c7d57da0bd01781918b5ce9da99c519abe9e4
-pyarrow @ file:///opt/miniconda3/conda-bld/pyarrow_1759833587105/work/python
-pycparser @ file:///opt/miniconda3/conda-bld/pycparser_1757496044852/work
-PySocks @ file:///opt/miniconda3/conda-bld/pysocks_1761753010242/work
-python-dateutil @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_66ud1l42_h/croot/python-dateutil_1716495741162/work
-pytz @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_3bjczh6it0/croot/pytz_1752135865541/work
-PyYAML @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_faoex52hrr/croot/pyyaml_1728657970485/work
-referencing @ file:///opt/miniconda3/conda-bld/referencing_1762536886664/work
-requests @ file:///opt/miniconda3/conda-bld/requests_1762359591792/work
-rpds-py @ file:///opt/miniconda3/conda-bld/rpds-py_1762366478996/work
-shellingham==1.5.4
-six @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_03myqm7p6o/croot/six_1744271511946/work
-smmap @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_dd873u6eqt/croot/smmap_1752748959979/work
-sniffio==1.3.1
-streamlit @ file:///opt/miniconda3/conda-bld/streamlit-split_1761826255148/work/streamlit
-sympy==1.13.1
-tenacity @ file:///opt/miniconda3/conda-bld/tenacity_1760375526914/work
-toml @ file:///tmp/build/80754af9/toml_1616166611790/work
-torch==2.5.1
-torchaudio==2.5.1
-torchvision==0.20.1
-tornado @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_63s3osc0_1/croot/tornado_1748956943583/work
-tqdm==4.67.1
-typer-slim==0.20.0
-typing_extensions @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_dffmcwqo6o/croot/typing_extensions_1756281471323/work
-tzdata @ file:///croot/python-tzdata_1746123641790/work
-urllib3 @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_95v32ztwo_/croot/urllib3_1750775480393/work
-xxhash==3.6.0
-yarl==1.22.0
+requests
+urllib3
+
+# --- Other Essential Libraries ---
+packaging
+protobuf
+pyarrow
+pytz
+PyYAML
+typing_extensions
