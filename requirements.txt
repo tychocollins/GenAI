@@ -1,6 +1,6 @@
 # --- Core Deep Learning & Imaging (STABLE PYTHON 3.11 VERSIONS) ---
-torch==2.3.1                 
-torchvision==0.18.1          
+torch>=2.5.0,<2.10.0                 
+torchvision>=0.15.0          
 Pillow==10.3.0               
 numpy==2.2.4                 
 datasets==4.4.1      
