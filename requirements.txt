@@ -1,32 +1,19 @@
-# --- Core Deep Learning & Imaging ---
-# Note: Using torch stable versions from your original list
-torch==2.5.1
-torchvision==0.20.1
+# --- Core Deep Learning & Imaging (FIXED FOR COMPATIBILITY) ---
+torch==2.3.1                 
+torchvision==0.18.1          
+Pillow==10.3.0               
+numpy==2.3.4                 
 
 # --- Data Loading, Handling, and Utilities ---
-datasets==4.4.1      # Used in dataloader.py for CelebA streaming
-pandas==2.3.3        # Used/imported for data handling
-numpy==2.3.4         # Core numerical library
-Pillow==10.3.0       # Used by PIL and torchvision
-scipy==1.13.1        # Needed for FID calculations (often a dependency of torch/numpy)
-tqdm==4.67.1         # Progress bars
+datasets==4.4.1      
+pandas==2.3.3        
+scipy==1.13.1        
+tqdm==4.67.1         
 
 # --- Dashboard & Web Framework ---
-streamlit==1.35.0    # The main web framework
-matplotlib==3.9.0    # Used by dashboard.py for plotting
-# Note: Altair is included if the dashboard uses it, but we use the package name instead of the local path
-altair==5.3.0        # (Based on the error line)
-
-# --- HTTP/API Dependencies (Required by Hugging Face/datasets) ---
-aiohttp==3.13.2
-aiosignal==1.4.0
-frozenlist==1.8.0
-yarl==1.22.0
-huggingface_hub==1.1.5
-httpcore==1.0.9
-httpx==0.28.1
-requests
-urllib3
+streamlit==1.35.0            
+matplotlib==3.9.0            
+altair==5.3.0        
 
 # --- Other Essential Libraries ---
 packaging
@@ -34,4 +21,4 @@ protobuf
 pyarrow
 pytz
 PyYAML
-typing_extensions
+typing_extensions==4.10.0 # Added a version for explicit safety
