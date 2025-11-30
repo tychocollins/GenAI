@@ -1,13 +1,11 @@
-# --- Core Deep Learning & Imaging (SYNCHRONIZED FINAL FIX) ---
-torch==2.6.0                 # CHANGED: Required by torchvision 0.21.0
-torchvision==0.21.0          # REQUIRED for Py3.13 compatibility
-Pillow==10.4.0               # CHANGED: Slightly newer version to ensure a wheel is used
-numpy==2.3.4                 
-
-# --- Data Loading, Handling, and Utilities ---
+# --- Core Deep Learning & Imaging (STABLE PYTHON 3.11 VERSIONS) ---
+torch==2.3.1                 # Stable Py3.11 version
+torchvision==0.18.1          # Paired stable Py3.11 version
+Pillow==10.3.0               
+numpy==2.2.4                 # FIXED: Downgraded to be compatible with Scipy
 datasets==4.4.1      
 pandas==2.3.3        
-scipy==1.13.1        
+scipy==1.13.1                # Now compatible with numpy==2.2.4
 tqdm==4.67.1         
 
 # --- Dashboard & Web Framework ---
