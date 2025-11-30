@@ -1,22 +1,50 @@
 # app_streamlit.py
 
-import streamlit as st
 import os
+import requests
+import streamlit as st
 import torch
 from generate_faces2 import load_model_from_checkpoint, generate_from_model
-import os
 from pathlib import Path
 
-st.set_page_config(page_title="GAN Face Generator", layout="wide")
+# ensure models dir exists
+Path("models").mkdir(parents=True, exist_ok=True)
 
-def find_checkpoint(models_dir="models"):
-    p = Path(models_dir)
-    if not p.exists():
-        return None
-    pts = sorted(p.glob("*.pt"), key=lambda x: x.stat().st_mtime, reverse=True)
-    return str(pts[0]) if pts else None
+def download_file(url: str, dst: str):
+    if not url:
+        return False
+    try:
+        resp = requests.get(url, stream=True, timeout=30)
+        resp.raise_for_status()
+        with open(dst, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+        return True
+    except Exception as e:
+        st.error(f"Failed to download checkpoint: {e}")
+        return False
 
-MODEL_PATH = find_checkpoint("models")
+# Locate checkpoint: prefer local latest, else download from CHECKPOINT_URL env var
+def find_or_get_checkpoint():
+    # prefer explicit latest file
+    latest = Path("models") / "latest_checkpoint.pt"
+    if latest.exists():
+        return str(latest)
+    # fallback: pick newest .pt in models/
+    pts = sorted(Path("models").glob("*.pt"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if pts:
+        return str(pts[0])
+    # attempt download from env var
+    url = os.environ.get("CHECKPOINT_URL", "").strip()
+    if url:
+        dst = str(latest)
+        st.info("Downloading checkpoint for first-time use (may take a while)...")
+        ok = download_file(url, dst)
+        return dst if ok else None
+    return None
+
+MODEL_PATH = find_or_get_checkpoint()
 NZ = 100
 
 @st.cache_resource
