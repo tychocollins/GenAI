@@ -164,12 +164,15 @@ def _robust_denorm_to_uint8(imgs: torch.Tensor) -> np.ndarray:
 
     return arr
 
-def generate_from_model(G, num_images=8, nz=100, device=None, seed=None):
+def generate_from_model(G, num_images=8, nz=100, device=None, seed=None, return_tensor: bool = False):
     """
-    Generate num_images images from G and return a torch.Tensor BxCxHxW (float32, range approx [-1,1]).
-    Heuristics:
-      - Try conv-style z (B,nz,1,1). If output looks degenerate, retry with dense z (B,nz).
-      - Ensure model in eval() and on correct device.
+    Generate num_images images from G.
+
+    By default (return_tensor=False) returns a list of numpy arrays dtype=uint8 shape (H,W,3)
+    suitable for streamlit.image(...) or Image.fromarray(...).
+
+    If return_tensor=True, returns a torch.Tensor of shape (B,3,H,W) dtype=float32 in range [-1,1]
+    (keeps previous CLI behaviour).
     """
     if device is None:
         device = next(G.parameters()).device
@@ -253,8 +256,25 @@ def generate_from_model(G, num_images=8, nz=100, device=None, seed=None):
             if s < 1e-3:
                 logging.warning("Generated image %d has very low std=%.6f -> likely degenerate.", i, s)
 
-        # return tensor on CPU (float32) in range [-1,1]
-        return out_t.to(torch.float32)
+        # if caller wants the raw tensor (CLI), return it
+        if return_tensor:
+            return out_t.to(torch.float32)
+
+        # Otherwise convert to uint8 HWC numpy arrays for display
+        disp = out_t.clone()  # in [-1,1]
+        disp = (disp + 1.0) / 2.0  # -> [0,1]
+        disp = disp.clamp(0.0, 1.0)
+        disp = (disp * 255.0).round().to(torch.uint8)
+        arr = disp.permute(0, 2, 3, 1).cpu().numpy()  # B,H,W,C uint8
+
+        # ensure 3 channels
+        if arr.shape[3] == 1:
+            arr = np.repeat(arr, 3, axis=3)
+        elif arr.shape[3] == 4:
+            arr = arr[:, :, :, :3]
+
+        # return list of numpy arrays (uint8 HWC) suitable for st.image(...)
+        return [arr[i] for i in range(arr.shape[0])]
 def denormalize_to_unit_range(imgs: torch.Tensor) -> torch.Tensor:
     """
     Convert from [-1, 1] to [0, 1] and clamp.
@@ -357,7 +377,9 @@ def main():
     print(f"[INFO] Using device: {device}")
 
     print(f"[INFO] Loading model from checkpoint: {checkpoint_path}")
-    model, ckpt_noise_dim = load_model_from_checkpoint(checkpoint_path, device)
+    model = load_model_from_checkpoint(checkpoint_path, device)
+    # load_model_from_checkpoint currently returns Generator instance; try to detect noise dim if stored
+    ckpt_noise_dim = None
 
     # Decide noise dimension: CLI > checkpoint > default 512
     noise_dim = args.noise_dim or ckpt_noise_dim or 512
@@ -370,10 +392,10 @@ def main():
     print(f"[INFO] Noise dimension: {noise_dim}")
 
     print(f"[INFO] Generating {args.num_samples} samples...")
-    raw_imgs = generate_from_model(model, args.num_samples, noise_dim, device=device)
-
+    # CLI wants the tensor form for saving; request return_tensor=True
+    raw_tensor = generate_from_model(model, args.num_samples, noise_dim, device=device, return_tensor=True)
     # Convert [-1,1] -> [0,1] before saving as PNG
-    imgs = denormalize_to_unit_range(raw_imgs)
+    imgs = denormalize_to_unit_range(raw_tensor)
 
     out_dir = Path(args.out_dir)
     save_generated_images(imgs, out_dir, prefix="gen")
