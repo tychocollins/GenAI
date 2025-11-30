@@ -62,7 +62,16 @@ def load_model_from_checkpoint(checkpoint_path, device=None, nz=100):
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # create model instance
     G = Generator(nz=nz).to(device)
+
+    # snapshot initial param norm
+    def _param_norm(model):
+        return float(sum(p.detach().cpu().float().norm().item() for p in model.parameters() if p is not None))
+
+    init_norm = _param_norm(G)
+    logging.info("Init generator param L2-norm: %.6f", init_norm)
+
     ckpt = torch.load(checkpoint_path, map_location=device)
 
     state = None
@@ -80,28 +89,76 @@ def load_model_from_checkpoint(checkpoint_path, device=None, nz=100):
         nk = k[len("module."):] if k.startswith("module.") else k
         norm_state[nk] = v
 
-    # try best-effort load
+    # report candidate sizes
+    g_state = G.state_dict()
+    ckpt_keys = set(norm_state.keys())
+    model_keys = set(g_state.keys())
+    common = sorted(list(model_keys & ckpt_keys))
+    only_ckpt = sorted(list(ckpt_keys - model_keys))[:30]
+    only_model = sorted(list(model_keys - ckpt_keys))[:30]
+    logging.info("Checkpoint keys: %d, Model keys: %d, Common keys: %d", len(ckpt_keys), len(model_keys), len(common))
+    if only_ckpt:
+        logging.info("Example keys in checkpoint but not model (first 30): %s", only_ckpt)
+    if only_model:
+        logging.info("Example keys in model but not checkpoint (first 30): %s", only_model)
+
+    # try best-effort load strict=False first
     try:
         G.load_state_dict(norm_state, strict=False)
-        logging.info("Loaded checkpoint into Generator with strict=False.")
+        post_norm = _param_norm(G)
+        logging.info("Loaded checkpoint into Generator with strict=False. Post-load param L2-norm: %.6f (delta %.6f)", post_norm, post_norm - init_norm)
+        # compute average param diff for common keys
+        diffs = []
+        for k in common:
+            ckpt_v = norm_state[k].to(torch.float32).cpu()
+            model_v = g_state[k].to(torch.float32).cpu()
+            if ckpt_v.shape == model_v.shape:
+                diffs.append(float((model_v - ckpt_v).norm().item()))
+        if diffs:
+            logging.info("Average param key diff (common matching-shape keys): %.6f over %d keys", float(sum(diffs)/len(diffs)), len(diffs))
         return G.eval()
     except Exception as e:
-        logging.warning("load_state_dict(strict=False) failed: %s", e)
+        logging.warning("load_state_dict(strict=False) failed or raised: %s", e)
 
     # fallback: load only matching keys by name+shape
-    g_state = G.state_dict()
     filtered = {}
+    mismatched = []
     for k, v in norm_state.items():
-        if k in g_state and hasattr(v, "shape") and g_state[k].shape == v.shape:
-            filtered[k] = v
+        if k in g_state and hasattr(v, "shape"):
+            if g_state[k].shape == v.shape:
+                filtered[k] = v
+            else:
+                mismatched.append((k, tuple(v.shape), tuple(g_state[k].shape)))
+
+    logging.info("Filtered compatible keys to load: %d. Mismatched shapes count: %d", len(filtered), len(mismatched))
+    if mismatched:
+        logging.info("Example mismatched keys (first 10): %s", mismatched[:10])
 
     if not filtered:
-        raise RuntimeError(f"No compatible parameter keys found between checkpoint and model. Checkpoint top keys: {list(state.keys())[:40]}")
+        raise RuntimeError(
+            "No compatible parameter keys found between checkpoint and model. "
+            "This usually means the checkpoint is for a different architecture or the Generator signature (module/class) differs. "
+            f"Checkpoint top keys (sample): {list(state.keys())[:40]}"
+        )
 
+    # merge and load
     merged = {**g_state}
     merged.update(filtered)
     G.load_state_dict(merged)
-    logging.info("Loaded matching subset of checkpoint keys into Generator.")
+    post_norm = _param_norm(G)
+    logging.info("Loaded matching subset of checkpoint keys into Generator. Post-load param L2-norm: %.6f (delta %.6f)", post_norm, post_norm - init_norm)
+
+    # list small-change keys (optional)
+    small_changes = []
+    for k in filtered.keys():
+        a = g_state[k].cpu().float()
+        b = filtered[k].cpu().float()
+        change = float((a - b).norm().item())
+        if change < 1e-6:
+            small_changes.append(k)
+    if len(small_changes) > 0:
+        logging.warning("Found %d keys with near-zero change after loading (may indicate identical values): first examples: %s", min(8, len(small_changes)), small_changes[:8])
+
     return G.eval()
 
 
