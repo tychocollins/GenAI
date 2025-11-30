@@ -112,7 +112,7 @@ def main():
     st.sidebar.title("Team Status")
     st.sidebar.write("Project components integrated successfully.")
     st.sidebar.markdown(
-        "* **Tycho:** Data Pipeline\n"
+        "* **Tycho:** Data Pipeline & Deployment Setup\n"
         "* **Erick:** Training Logs/Checkpoints\n"
         "* **John:** Generated Output\n"
         "* **Cesar:** Metric Calculation\n"
