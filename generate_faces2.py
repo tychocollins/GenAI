@@ -29,6 +29,7 @@ import numpy as np
 from pathlib import Path
 import torch
 import logging
+import sys
 
 logging.getLogger(__name__).setLevel(logging.INFO)
 
@@ -108,6 +109,61 @@ def sample_noise(batch_size: int, noise_dim: int, device: torch.device) -> torch
     return torch.randn(batch_size, noise_dim, device=device)
 
 
+def _robust_denorm_to_uint8(imgs: torch.Tensor) -> np.ndarray:
+    """
+    Convert generator output (B,C,H,W) with unknown range to uint8 HWC numpy array.
+    Heuristics:
+      - If float and range looks like [-1,1] => map to [0,255]
+      - If float and range looks like [0,1] => map to [0,255]
+      - If already uint8 => pass through
+      - If single-channel => repeat to 3 channels
+    Returns: np.ndarray shape (B,H,W,3) dtype uint8
+    """
+    if not isinstance(imgs, torch.Tensor):
+        raise TypeError("expected torch.Tensor")
+
+    # move to CPU float for inspection
+    t = imgs.detach().cpu()
+    B, C, H, W = t.shape
+    info = f"tensor shape={t.shape} dtype={t.dtype} min={t.min().item():.4f} max={t.max().item():.4f} mean={t.mean().item():.4f}"
+    logging.info("[DENORM] %s", info)
+    # If already uint8
+    if t.dtype == torch.uint8:
+        arr = t.permute(0, 2, 3, 1).numpy()
+    else:
+        t = t.float()
+        mn = float(t.min().item())
+        mx = float(t.max().item())
+
+        if mn >= -1.1 and mx <= 1.1:
+            # assume tanh [-1,1]
+            t = (t + 1.0) / 2.0
+            logging.info("[DENORM] Assuming generator output in [-1,1] (tanh).")
+        elif mn >= -0.01 and mx <= 1.01:
+            # assume sigmoid / [0,1]
+            logging.info("[DENORM] Assuming generator output in [0,1] (sigmoid).")
+        elif mx > 1.0 and mx <= 255.0 and mn >= 0.0:
+            # already 0..255 float
+            t = t / 255.0
+            logging.info("[DENORM] Generator output appears to be in 0..255 floats; scaling down.")
+        else:
+            # fallback: scale using min/max to [0,1]
+            logging.warning("[DENORM] Unexpected range (min=%f max=%f). Applying linear min/max rescale.", mn, mx)
+            t = (t - mn) / (mx - mn + 1e-8)
+
+        t = t.clamp(0.0, 1.0)
+        t = (t * 255.0).round().to(torch.uint8)
+        arr = t.permute(0, 2, 3, 1).numpy()
+
+    # Ensure 3 channels for PIL display
+    if arr.shape[3] == 1:
+        arr = np.repeat(arr, 3, axis=3)
+    elif arr.shape[3] == 4:
+        # keep RGBA but convert to RGB by discarding alpha for dashboard
+        arr = arr[:, :, :, :3]
+
+    return arr
+
 def generate_from_model(G, num_images=8, nz=100, device=None, seed=None):
     """
     Generate num_images PIL images from G.
@@ -120,28 +176,19 @@ def generate_from_model(G, num_images=8, nz=100, device=None, seed=None):
         torch.manual_seed(seed)
 
     with torch.no_grad():
+        # support both dense z ([B,nz]) and conv z ([B,nz,1,1])
         z = torch.randn(num_images, nz, 1, 1, device=device)
-        imgs = G(z)  # BxCxHxW in [-1,1]
-    arr = _denorm_tensor(imgs)  # B,H,W,C uint8
+        imgs = G(z)  # expected BxCxHxW
+    # debug: log tensor stats before converting
+    try:
+        logging.info("Generator output: shape=%s dtype=%s min=%.4f max=%.4f",
+                     tuple(imgs.shape), str(imgs.dtype), float(imgs.min()), float(imgs.max()))
+    except Exception:
+        logging.info("Generator output logging failed.")
+
+    arr = _robust_denorm_to_uint8(imgs)  # B,H,W,3 uint8
     pil_images = [Image.fromarray(arr[i]) for i in range(arr.shape[0])]
     return pil_images
-
-
-def _denorm_tensor(imgs: torch.Tensor) -> np.ndarray:
-    """
-    Convert a batch tensor in shape (B, C, H, W) with values in [-1, 1]
-    to a numpy array of shape (B, H, W, C) dtype=uint8 with values 0..255.
-    """
-    if not isinstance(imgs, torch.Tensor):
-        raise TypeError("_denorm_tensor expects a torch.Tensor")
-    # [-1,1] -> [0,1]
-    imgs = (imgs + 1.0) / 2.0
-    imgs = imgs.clamp(0.0, 1.0)
-    # to uint8 0..255
-    imgs = (imgs * 255.0).round().to(torch.uint8)
-    # move channels last and copy to CPU numpy
-    arr = imgs.permute(0, 2, 3, 1).cpu().numpy()
-    return arr
 
 
 def denormalize_to_unit_range(imgs: torch.Tensor) -> torch.Tensor:
