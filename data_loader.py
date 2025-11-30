@@ -1,3 +1,7 @@
+#Tycho Collins
+#DataLoader file from CelebA Dataset
+
+
 import torch
 from torch.utils.data import DataLoader
 from datasets import load_dataset
