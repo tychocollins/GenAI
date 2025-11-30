@@ -163,6 +163,21 @@ def save_generated_images(imgs: torch.Tensor, out_dir: Path, prefix: str = "gen"
     print(f"[INFO] Saved {n} individual images to: {out_dir}")
 
 
+# ensure Generator is available
+try:
+    # common places: train.py, models.py, model.py
+    from train import Generator
+except Exception:
+    try:
+        from models import Generator
+    except Exception:
+        try:
+            from model import Generator
+        except Exception as e:
+            raise ImportError(
+                "Generator class not found. Define it in this repo or export it from train.py / models.py / model.py"
+            ) from e
+
 # ---- CLI / Main -----------------------------------------------------------
 
 def parse_args():
