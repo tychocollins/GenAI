@@ -4,11 +4,17 @@ from pathlib import Path
 from torch.utils.data import DataLoader, Dataset
 from torchvision.models import inception_v3, Inception_V3_Weights
 
+<<<<<<< HEAD
+=======
+from utils import get_device
+
+>>>>>>> cesar/main
 # Metric tools authored by Cesar Cabrera
 
 
 def _pick_device(device):
     if device:
+<<<<<<< HEAD
         return torch.device(device)
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -19,6 +25,31 @@ def _build_inception(device):
         aux_logits=True,  # required by builder; we strip head below
         transform_input=False,
     )
+=======
+        return get_device(device)
+    return get_device()
+
+
+def _build_inception(device, weights_path=None):
+    try:
+        if weights_path:
+            model = inception_v3(weights=None, aux_logits=True, transform_input=False)
+            state = torch.load(weights_path, map_location="cpu")
+            model.load_state_dict(state, strict=False)
+        else:
+            model = inception_v3(
+                weights=Inception_V3_Weights.IMAGENET1K_V1,
+                aux_logits=True,  # required by builder; we strip head below
+                transform_input=False,
+            )
+    except Exception as e:
+        print(
+            "Failed to load Inception V3 weights. Ensure internet access or provide a local weights file via "
+            "--weights <path> when running metrics_runner.py. Error:", e
+        )
+        return None
+
+>>>>>>> cesar/main
     model.fc = torch.nn.Identity()
     model.dropout = torch.nn.Identity()
     model.AuxLogits = torch.nn.Identity()  # remove aux head
@@ -74,13 +105,23 @@ def _matrix_sqrt(mat):
     return eigenvectors @ torch.diag(sqrt_eig) @ eigenvectors.t()
 
 
+<<<<<<< HEAD
 def fid_from_loaders(real_loader, fake_loader, device=None, max_batches=None):
+=======
+def fid_from_loaders(real_loader, fake_loader, device=None, max_batches=None, weights_path=None):
+>>>>>>> cesar/main
     """
     Computes Frechet Inception Distance between two loaders.
     Expects images normalized to [-1, 1] with shape [B, 3, H, W].
     """
     device = _pick_device(device)
+<<<<<<< HEAD
     model = _build_inception(device)
+=======
+    model = _build_inception(device, weights_path=weights_path)
+    if model is None:
+        raise RuntimeError("InceptionV3 weights unavailable. Provide --weights <path> for offline metrics.")
+>>>>>>> cesar/main
 
     real_feats = _collect_features(real_loader, model, device, max_batches)
     fake_feats = _collect_features(fake_loader, model, device, max_batches)
@@ -100,13 +141,23 @@ def fid_from_loaders(real_loader, fake_loader, device=None, max_batches=None):
     return fid.item()
 
 
+<<<<<<< HEAD
 def collapse_report(fake_loader, device=None, max_batches=None):
+=======
+def collapse_report(fake_loader, device=None, max_batches=None, weights_path=None):
+>>>>>>> cesar/main
     """
     Light heuristic for mode collapse using inception feature spread.
     Returns variance and mean pairwise distance.
     """
     device = _pick_device(device)
+<<<<<<< HEAD
     model = _build_inception(device)
+=======
+    model = _build_inception(device, weights_path=weights_path)
+    if model is None:
+        raise RuntimeError("InceptionV3 weights unavailable. Provide --weights <path> for offline metrics.")
+>>>>>>> cesar/main
 
     feats = _collect_features(fake_loader, model, device, max_batches)
     cov, _ = _covariance(feats)
@@ -124,13 +175,29 @@ def collapse_report(fake_loader, device=None, max_batches=None):
     }
 
 
+<<<<<<< HEAD
 def compute_and_store_metrics(real_loader, fake_loader, save_path="outputs/logs/metrics.pt", device=None, max_batches=None):
+=======
+def compute_and_store_metrics(
+    real_loader,
+    fake_loader,
+    save_path="outputs/logs/metrics.pt",
+    device=None,
+    max_batches=None,
+    weights_path=None,
+):
+>>>>>>> cesar/main
     """
     Computes FID and collapse signal, then stores them for the dashboard.
     Saves a dict with keys: 'fid', 'collapse', 'collapse_detail'.
     """
+<<<<<<< HEAD
     fid_val = fid_from_loaders(real_loader, fake_loader, device=device, max_batches=max_batches)
     collapse = collapse_report(fake_loader, device=device, max_batches=max_batches)
+=======
+    fid_val = fid_from_loaders(real_loader, fake_loader, device=device, max_batches=max_batches, weights_path=weights_path)
+    collapse = collapse_report(fake_loader, device=device, max_batches=max_batches, weights_path=weights_path)
+>>>>>>> cesar/main
 
     metrics = {
         "fid": fid_val,

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # --- Core Deep Learning & Imaging (STABLE PYTHON 3.11 VERSIONS) ---
 torch>=2.5.0,<2.10.0                 
 torchvision>=0.15.0          
@@ -33,10 +34,26 @@ Pillow==10.4.0
 numpy==2.2.4
 
 # ML / data
+=======
+# Extra index for CPU wheels
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# Core
+torch>=2.5.0,<2.10.0
+torchvision>=0.15.0
+numpy==2.2.4
+Pillow==10.4.0
+
+# Data / ML
+>>>>>>> cesar/main
 datasets==4.4.1
 pandas==2.3.3
 scipy==1.13.1
 tqdm==4.67.1
+<<<<<<< HEAD
+=======
+pyarrow
+>>>>>>> cesar/main
 
 # App / viz
 streamlit==1.36.0
@@ -46,7 +63,10 @@ altair==5.3.0
 # Misc
 packaging
 protobuf
+<<<<<<< HEAD
 pyarrow
+=======
+>>>>>>> cesar/main
 pytz
 PyYAML
 typing_extensions==4.10.0

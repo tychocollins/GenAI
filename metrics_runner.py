@@ -44,6 +44,14 @@ def build_noise_loader(count=96, seed=0, batch_size=16):
     return DataLoader(_NoiseImages(count=count, seed=seed), batch_size=batch_size)
 
 
+<<<<<<< HEAD
+=======
+def _dir_has_images(path):
+    p = Path(path)
+    return p.exists() and any(f.suffix.lower() in ALLOWED_EXTS for f in p.rglob("*"))
+
+
+>>>>>>> cesar/main
 def main():
     parser = argparse.ArgumentParser(description="Run FID + collapse metrics and store for the dashboard.")
     parser.add_argument("--real_dir", type=str, default=None, help="Directory with real images (optional).")
@@ -58,10 +66,23 @@ def main():
         default="outputs/logs/metrics.pt",
         help="Where to save metrics for the dashboard.",
     )
+<<<<<<< HEAD
     parser.add_argument("--device", type=str, default=None, help="torch device, e.g., cpu or cuda.")
     args = parser.parse_args()
 
     if args.real_dir and args.fake_dir:
+=======
+    parser.add_argument("--device", type=str, default=None, help="torch device, e.g., cpu / cuda / mps.")
+    parser.add_argument(
+        "--weights",
+        type=str,
+        default=None,
+        help="Optional local InceptionV3 weights file to avoid online download (state_dict).",
+    )
+    args = parser.parse_args()
+
+    if args.real_dir and args.fake_dir and _dir_has_images(args.real_dir) and _dir_has_images(args.fake_dir):
+>>>>>>> cesar/main
         print(f"[INFO] Using image folders for metrics: real={args.real_dir}, fake={args.fake_dir}")
         real_loader = build_loader(args.real_dir, batch_size=args.batch_size, resolution=args.resolution)
         fake_loader = build_loader(args.fake_dir, batch_size=args.batch_size, resolution=args.resolution)
@@ -76,6 +97,10 @@ def main():
         save_path=args.save_path,
         device=args.device,
         max_batches=args.max_batches,
+<<<<<<< HEAD
+=======
+        weights_path=args.weights,
+>>>>>>> cesar/main
     )
 
     print(f"[DONE] Saved metrics to {args.save_path}")

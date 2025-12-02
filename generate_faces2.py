@@ -18,6 +18,7 @@
 # The saved images are picked up automatically by:
 #   - Da Marc's dashboard.py (Latest Generated Samples panel)
 
+<<<<<<< HEAD
 import argparse
 import math
 import os
@@ -33,6 +34,32 @@ import sys
 import time
 
 logging.getLogger(__name__).setLevel(logging.INFO)
+=======
+import argparse
+import math
+import os
+import torch
+import torch.nn as nn
+from torchvision.utils import make_grid, save_image
+from PIL import Image
+import numpy as np
+from pathlib import Path
+import torch
+import logging
+import sys
+import time
+
+from utils import get_device
+from train import Generator
+
+logging.getLogger(__name__).setLevel(logging.INFO)
+
+
+def _pick_device(force_cpu: bool = False, requested: str | None = None) -> torch.device:
+    if force_cpu:
+        return torch.device("cpu")
+    return get_device(requested)
+>>>>>>> cesar/main
 
 def _looks_like_state_dict(d: dict) -> bool:
     if not isinstance(d, dict) or len(d) == 0:
@@ -58,12 +85,34 @@ def _extract_state_dict(ckpt: dict):
         return ckpt
     return None
 
+<<<<<<< HEAD
 def load_model_from_checkpoint(checkpoint_path, device=None, nz=100):
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # create model instance
     G = Generator(nz=nz).to(device)
+=======
+def load_model_from_checkpoint(checkpoint_path, device=None, nz=100):
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+    if device is None:
+        device = get_device()
+
+    try:
+        ckpt = torch.load(checkpoint_path, map_location=device)
+    except Exception as e:
+        raise RuntimeError(f"Failed to read checkpoint {checkpoint_path}: {e}") from e
+    if not isinstance(ckpt, dict) or ckpt.get("model_type") != "dcgan":
+        raise RuntimeError(
+            f"Checkpoint {checkpoint_path} is not a DCGAN generator checkpoint (expected model_type='dcgan'). "
+            "Train a DCGAN with train.py --model dcgan first."
+        )
+    nz = int(ckpt.get("nz", nz))
+
+    # create model instance
+    G = Generator(nz=nz).to(device)
+>>>>>>> cesar/main
 
     # snapshot initial param norm
     def _param_norm(model):
@@ -72,6 +121,7 @@ def load_model_from_checkpoint(checkpoint_path, device=None, nz=100):
     init_norm = _param_norm(G)
     logging.info("Init generator param L2-norm: %.6f", init_norm)
 
+<<<<<<< HEAD
     ckpt = torch.load(checkpoint_path, map_location=device)
 
     state = None
@@ -82,6 +132,12 @@ def load_model_from_checkpoint(checkpoint_path, device=None, nz=100):
 
     if state is None:
         raise RuntimeError(f"No valid state_dict found in checkpoint: {checkpoint_path}. Top keys: {list(ckpt.keys()) if isinstance(ckpt, dict) else type(ckpt)}")
+=======
+    state = _extract_state_dict(ckpt)
+
+    if state is None:
+        raise RuntimeError(f"No valid state_dict found in checkpoint: {checkpoint_path}. Top keys: {list(ckpt.keys()) if isinstance(ckpt, dict) else type(ckpt)}")
+>>>>>>> cesar/main
 
     # normalize keys (remove "module." prefix)
     norm_state = {}
@@ -102,6 +158,7 @@ def load_model_from_checkpoint(checkpoint_path, device=None, nz=100):
     if only_model:
         logging.info("Example keys in model but not checkpoint (first 30): %s", only_model)
 
+<<<<<<< HEAD
     # try best-effort load strict=False first
     try:
         G.load_state_dict(norm_state, strict=False)
@@ -160,6 +217,12 @@ def load_model_from_checkpoint(checkpoint_path, device=None, nz=100):
         logging.warning("Found %d keys with near-zero change after loading (may indicate identical values): first examples: %s", min(8, len(small_changes)), small_changes[:8])
 
     return G.eval()
+=======
+    G.load_state_dict(norm_state, strict=True)
+    post_norm = _param_norm(G)
+    logging.info("Loaded checkpoint into Generator with strict=True. Post-load param L2-norm: %.6f (delta %.6f)", post_norm, post_norm - init_norm)
+    return G.eval()
+>>>>>>> cesar/main
 
 
 def sample_noise(batch_size: int, noise_dim: int, device: torch.device) -> torch.Tensor:
@@ -405,6 +468,7 @@ def save_generated_images(imgs: torch.Tensor, out_dir: Path, prefix: str = "gen"
     print(f"[INFO] Saved {n} individual images to: {out_dir}")
 
 
+<<<<<<< HEAD
 # ensure Generator is available
 try:
     # common places: train.py, models.py, model.py
@@ -425,6 +489,15 @@ except Exception:
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Generate faces from latent noise using trained weights."
+=======
+# ensure Generator is available
+
+# ---- CLI / Main -----------------------------------------------------------
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Generate faces from latent noise using trained weights."
+>>>>>>> cesar/main
     )
     parser.add_argument(
         "--checkpoint",
@@ -453,6 +526,7 @@ def parse_args():
         help="Directory to save generated images.",
     )
     parser.add_argument(
+<<<<<<< HEAD
         "--cpu",
         action="store_true",
         help="Force CPU even if CUDA is available.",
@@ -484,6 +558,50 @@ def main():
             "Using CLI value."
         )
     print(f"[INFO] Noise dimension: {noise_dim}")
+=======
+        "--cpu",
+        action="store_true",
+        help="Force CPU even if CUDA is available.",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cpu",
+        help="cpu or cuda",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+
+    checkpoint_path = Path(args.checkpoint)
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+
+    if args.cpu:
+        device = torch.device("cpu")
+    else:
+        device = torch.device(args.device)
+    print(f"[INFO] Using device: {device}")
+
+    print(f"[INFO] Loading model from checkpoint: {checkpoint_path}")
+    try:
+        ckpt = torch.load(checkpoint_path, map_location=device)
+        ckpt_noise_dim = ckpt.get("nz")
+        model = load_model_from_checkpoint(checkpoint_path, device, nz=ckpt_noise_dim or 100)
+    except Exception as e:
+        print(f"[ERROR] Could not load checkpoint: {e}")
+        return
+
+    # Decide noise dimension: CLI > checkpoint > model nz
+    noise_dim = args.noise_dim or ckpt_noise_dim or 100
+    if args.noise_dim and ckpt_noise_dim and args.noise_dim != ckpt_noise_dim:
+        print(
+            f"[WARN] noise_dim={args.noise_dim} differs from checkpoint nz={ckpt_noise_dim}. Using CLI value."
+        )
+    print(f"[INFO] Noise dimension: {noise_dim}")
+>>>>>>> cesar/main
 
     print(f"[INFO] Generating {args.num_samples} samples...")
     # CLI wants the tensor form for saving; request return_tensor=True
