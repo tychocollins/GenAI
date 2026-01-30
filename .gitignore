@@ -5,3 +5,8 @@ outputs/
 data/
 models/
 *.pt
+.DS_Store
+dml10/
+dmlenv/
+debug_gen_*.png
+.ipynb_checkpoints/
