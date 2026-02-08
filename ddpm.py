@@ -55,9 +55,17 @@ class ResidualBlock(nn.Module):
 
 
 class AttentionBlock(nn.Module):
-    def __init__(self, channels: int):
+    def __init__(self, channels: int, num_heads: int = 1, num_head_channels: int = -1):
         super().__init__()
         self.norm = _group_norm(channels)
+        if num_head_channels == -1:
+            self.num_heads = num_heads
+        else:
+            assert (
+                channels % num_head_channels == 0
+            ), f"channels {channels} must be divisible by num_head_channels {num_head_channels}"
+            self.num_heads = channels // num_head_channels
+
         self.qkv = nn.Conv2d(channels, channels * 3, 1)
         self.proj = nn.Conv2d(channels, channels, 1)
 
@@ -65,14 +73,22 @@ class AttentionBlock(nn.Module):
         b, c, h, w = x.shape
         h_ = self.norm(x)
         qkv = self.qkv(h_)
-        q, k, v = torch.chunk(qkv, 3, dim=1)
+        # qkv: [b, c*3, h, w] -> [b, c*3, h*w]
+        qkv = qkv.reshape(b, -1, h * w)
+        q, k, v = torch.chunk(qkv, 3, dim=1)  # each [b, c, h*w]
 
-        q = q.reshape(b, c, h * w).permute(0, 2, 1)
-        k = k.reshape(b, c, h * w)
-        v = v.reshape(b, c, h * w).permute(0, 2, 1)
+        # [b, heads, c/heads, h*w]
+        q = q.reshape(b, self.num_heads, c // self.num_heads, h * w)
+        k = k.reshape(b, self.num_heads, c // self.num_heads, h * w)
+        v = v.reshape(b, self.num_heads, c // self.num_heads, h * w)
 
-        attn = torch.softmax(torch.bmm(q, k) / math.sqrt(c), dim=-1)
-        out = torch.bmm(attn, v).permute(0, 2, 1).reshape(b, c, h, w)
+        # scale
+        scale = 1 / math.sqrt(math.sqrt(c // self.num_heads))
+        weight = torch.einsum("bchw,bchy->bwhy", q * scale, k * scale)  # [b, heads, h*w, h*w]
+        weight = torch.softmax(weight, dim=-1)
+
+        out = torch.einsum("bwhy,bchy->bchw", weight, v)  # [b, heads, c/heads, h*w]
+        out = out.reshape(b, c, h, w)
         out = self.proj(out)
         return x + out
 
@@ -99,15 +115,17 @@ class Upsample(nn.Module):
 class UNetModel(nn.Module):
     def __init__(
         self,
+        image_size: int,
         in_channels: int = 3,
         base_channels: int = 64,
         channel_mults: Sequence[int] = (1, 2, 4, 8),
         num_res_blocks: int = 2,
         dropout: float = 0.0,
         time_dim: Optional[int] = None,
-        use_attention: bool = True,
+        attn_resolutions: Sequence[int] = (16,),
     ):
         super().__init__()
+        self.image_size = image_size
         self.in_channels = in_channels
         time_dim = time_dim or base_channels * 4
 
@@ -121,35 +139,41 @@ class UNetModel(nn.Module):
 
         self.downs = nn.ModuleList()
         ch = base_channels
+        curr_res = image_size
         for mult in channel_mults:
             out_ch = base_channels * mult
             blocks = nn.ModuleList()
             for _ in range(num_res_blocks):
                 blocks.append(ResidualBlock(ch, out_ch, time_dim, dropout))
                 ch = out_ch
+                if curr_res in attn_resolutions:
+                    blocks.append(AttentionBlock(ch, num_head_channels=32))
             layer_dict = {"blocks": blocks}
-            if use_attention:
-                layer_dict["attn"] = AttentionBlock(ch)
+            # Remove old explicit attn check
             if mult != channel_mults[-1]:
                 layer_dict["down"] = Downsample(ch)
+                curr_res //= 2
             self.downs.append(nn.ModuleDict(layer_dict))
 
+
         self.mid_block1 = ResidualBlock(ch, ch, time_dim, dropout)
-        self.mid_attn = AttentionBlock(ch) if use_attention else None
+        # Mid attention is usually essential for global coherence
+        self.mid_attn = AttentionBlock(ch, num_head_channels=32)
         self.mid_block2 = ResidualBlock(ch, ch, time_dim, dropout)
 
         self.ups = nn.ModuleList()
         for idx, mult in enumerate(reversed(channel_mults)):
             out_ch = base_channels * mult
             blocks = nn.ModuleList()
-            for _ in range(num_res_blocks):
+            for _ in range(num_res_blocks + 1):
                 blocks.append(ResidualBlock(ch + out_ch, out_ch, time_dim, dropout))
                 ch = out_ch
+                if curr_res in attn_resolutions:
+                    blocks.append(AttentionBlock(ch, num_head_channels=32))
             layer_dict = {"blocks": blocks}
-            if use_attention:
-                layer_dict["attn"] = AttentionBlock(ch)
             if idx != len(channel_mults) - 1:
                 layer_dict["up"] = Upsample(ch)
+                curr_res *= 2
             self.ups.append(nn.ModuleDict(layer_dict))
 
         self.final_norm = _group_norm(ch)
@@ -164,27 +188,26 @@ class UNetModel(nn.Module):
 
         for layer in self.downs:
             for block in layer["blocks"]:
-                h = block(h, t_emb)
-                if "attn" in layer:
-                    attn = layer["attn"]
-                    h = h + attn(h)
+                if isinstance(block, ResidualBlock):
+                    h = block(h, t_emb)
+                else:
+                    h = block(h)
                 residuals.append(h)
             if "down" in layer:
                 h = layer["down"](h)
 
         h = self.mid_block1(h, t_emb)
-        if self.mid_attn is not None:
-            h = self.mid_attn(h)
+        h = self.mid_attn(h)
         h = self.mid_block2(h, t_emb)
 
         for layer in self.ups:
             for block in layer["blocks"]:
-                res = residuals.pop()
-                h = torch.cat([h, res], dim=1)
-                h = block(h, t_emb)
-            if "attn" in layer:
-                attn = layer["attn"]
-                h = h + attn(h)
+                if isinstance(block, ResidualBlock):
+                    res = residuals.pop()
+                    h = torch.cat([h, res], dim=1)
+                    h = block(h, t_emb)
+                else:
+                    h = block(h)
             if "up" in layer:
                 h = layer["up"](h)
 
@@ -199,10 +222,27 @@ def _extract(coeff: torch.Tensor, timesteps: torch.Tensor, x_shape: Tuple[int, .
     return out.view(b, *([1] * (len(x_shape) - 1)))
 
 
-class LinearNoiseScheduler(nn.Module):
-    def __init__(self, num_train_timesteps: int = 1000, beta_start: float = 1e-4, beta_end: float = 2e-2):
+class NoiseScheduler(nn.Module):
+    def __init__(
+        self,
+        num_train_timesteps: int = 1000,
+        beta_start: float = 1e-4,
+        beta_end: float = 2e-2,
+        schedule_type: str = "linear",
+    ):
         super().__init__()
-        betas = torch.linspace(beta_start, beta_end, num_train_timesteps)
+        self.num_train_timesteps = num_train_timesteps
+        self.beta_start = beta_start
+        self.beta_end = beta_end
+        self.schedule_type = schedule_type
+
+        if schedule_type == "linear":
+            betas = torch.linspace(beta_start, beta_end, num_train_timesteps)
+        elif schedule_type == "cosine":
+            betas = self._cosine_beta_schedule(num_train_timesteps, s=0.008)
+        else:
+            raise ValueError(f"Unknown schedule_type {schedule_type}")
+
         alphas = 1.0 - betas
         alphas_cumprod = torch.cumprod(alphas, dim=0)
         alphas_cumprod_prev = torch.cat([torch.tensor([1.0]), alphas_cumprod[:-1]], dim=0)
@@ -217,9 +257,16 @@ class LinearNoiseScheduler(nn.Module):
             "posterior_variance", betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod + 1e-8)
         )
 
-        self.num_train_timesteps = num_train_timesteps
-        self.beta_start = beta_start
-        self.beta_end = beta_end
+    def _cosine_beta_schedule(self, timesteps: int, s: float = 0.008) -> torch.Tensor:
+        """
+        cosine schedule as proposed in https://arxiv.org/abs/2102.09672
+        """
+        steps = timesteps + 1
+        x = torch.linspace(0, timesteps, steps)
+        alphas_cumprod = torch.cos(((x / timesteps) + s) / (1 + s) * math.pi * 0.5) ** 2
+        alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
+        betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
+        return torch.clip(betas, 0.0001, 0.9999)
 
     def add_noise(self, x0: torch.Tensor, timesteps: torch.Tensor, noise: Optional[torch.Tensor] = None) -> torch.Tensor:
         noise = noise if noise is not None else torch.randn_like(x0)
@@ -244,6 +291,7 @@ class LinearNoiseScheduler(nn.Module):
             "num_train_timesteps": self.num_train_timesteps,
             "beta_start": self.beta_start,
             "beta_end": self.beta_end,
+            "schedule_type": self.schedule_type,
         }
 
 
@@ -258,24 +306,27 @@ class DDPMConfig:
     timesteps: int = 1000
     beta_start: float = 1e-4
     beta_end: float = 2e-2
-    use_attention: bool = True
+    schedule_type: str = "linear"
+    attn_resolutions: Tuple[int, ...] = (16,)
 
     def to_unet(self) -> UNetModel:
         return UNetModel(
+            image_size=self.image_size,
             in_channels=self.in_channels,
             base_channels=self.base_channels,
             channel_mults=self.channel_mults,
             num_res_blocks=self.num_res_blocks,
             dropout=self.dropout,
             time_dim=self.base_channels * 4,
-            use_attention=self.use_attention,
+            attn_resolutions=self.attn_resolutions,
         )
 
-    def to_scheduler(self) -> LinearNoiseScheduler:
-        return LinearNoiseScheduler(
+    def to_scheduler(self) -> NoiseScheduler:
+        return NoiseScheduler(
             num_train_timesteps=self.timesteps,
             beta_start=self.beta_start,
             beta_end=self.beta_end,
+            schedule_type=self.schedule_type,
         )
 
 
@@ -283,7 +334,7 @@ def save_ddpm_checkpoint(
     path: str,
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
-    scheduler: LinearNoiseScheduler,
+    scheduler: NoiseScheduler,
     epoch: int,
     step: int,
     config: DDPMConfig,
@@ -306,7 +357,7 @@ def load_ddpm_checkpoint(
     path: str,
     model: nn.Module,
     optimizer: Optional[torch.optim.Optimizer] = None,
-    scheduler: Optional[LinearNoiseScheduler] = None,
+    scheduler: Optional[NoiseScheduler] = None,
     map_location: str | torch.device = "cpu",
 ) -> Dict:
     device = torch.device(map_location)
@@ -325,6 +376,7 @@ def load_ddpm_checkpoint(
             num_train_timesteps=sched_cfg.get("num_train_timesteps", scheduler.num_train_timesteps),
             beta_start=sched_cfg.get("beta_start", scheduler.beta_start),
             beta_end=sched_cfg.get("beta_end", scheduler.beta_end),
+            schedule_type=sched_cfg.get("schedule_type", getattr(scheduler, "schedule_type", "linear")),
         )
         scheduler.to(device)
     return ckpt
@@ -346,6 +398,7 @@ def load_ddpm_for_inference(path: str, device: torch.device):
             num_train_timesteps=ckpt["scheduler"].get("num_train_timesteps", scheduler.num_train_timesteps),
             beta_start=ckpt["scheduler"].get("beta_start", scheduler.beta_start),
             beta_end=ckpt["scheduler"].get("beta_end", scheduler.beta_end),
+            schedule_type=ckpt["scheduler"].get("schedule_type", getattr(scheduler, "schedule_type", "linear")),
         )
         scheduler.to(device)
     return model.eval(), scheduler, config
@@ -354,7 +407,7 @@ def load_ddpm_for_inference(path: str, device: torch.device):
 @torch.no_grad()
 def sample_ddpm(
     model: nn.Module,
-    scheduler: LinearNoiseScheduler,
+    scheduler: NoiseScheduler,
     num_samples: int,
     shape: Tuple[int, int, int],
     device: torch.device,

@@ -19,11 +19,12 @@ def add_ddpm_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentPars
     parser.add_argument("--timesteps", type=int, default=1000, help="Number of diffusion steps.")
     parser.add_argument("--beta-start", type=float, default=1e-4, help="Starting beta for scheduler.")
     parser.add_argument("--beta-end", type=float, default=2e-2, help="Ending beta for scheduler.")
+    parser.add_argument("--schedule", type=str, default="linear", choices=["linear", "cosine"], help="Beta schedule type.")
     parser.add_argument("--base-channels", type=int, default=64, help="Base channel width for UNet.")
     parser.add_argument("--channel-mults", type=int, nargs="+", default=[1, 2, 4, 8], help="Channel multipliers.")
     parser.add_argument("--num-res-blocks", type=int, default=2, help="ResBlocks per resolution.")
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate in UNet.")
-    parser.add_argument("--no-attention", action="store_true", help="Disable attention blocks in UNet.")
+    parser.add_argument("--attn-resolutions", type=int, nargs="+", default=[16], help="Resolutions to apply attention.")
     parser.add_argument("--grad-clip", type=float, default=1.0, help="Gradient clipping norm (0 to disable).")
     parser.add_argument("--sample-interval", type=int, default=200, help="Steps between saving DDPM samples.")
     parser.add_argument("--sample-batch", type=int, default=8, help="Number of samples to generate per preview.")
@@ -53,11 +54,12 @@ def train_ddpm(args):
         _assert_match(args.timesteps, resume_config.timesteps, "--timesteps")
         _assert_match(args.beta_start, resume_config.beta_start, "--beta-start")
         _assert_match(args.beta_end, resume_config.beta_end, "--beta-end")
+        _assert_match(args.schedule, resume_config.schedule_type, "--schedule")
         _assert_match(args.base_channels, resume_config.base_channels, "--base-channels")
         _assert_match(tuple(args.channel_mults), tuple(resume_config.channel_mults), "--channel-mults")
         _assert_match(args.num_res_blocks, resume_config.num_res_blocks, "--num-res-blocks")
         _assert_match(args.dropout, resume_config.dropout, "--dropout")
-        _assert_match(not args.no_attention, resume_config.use_attention, "--no-attention")
+        _assert_match(tuple(args.attn_resolutions), tuple(resume_config.attn_resolutions), "--attn-resolutions")
         _assert_match(3, resume_config.in_channels, "--in-channels (fixed to 3)")
         config = resume_config
     else:
@@ -69,9 +71,9 @@ def train_ddpm(args):
             num_res_blocks=args.num_res_blocks,
             dropout=args.dropout,
             timesteps=args.timesteps,
-            beta_start=args.beta_start,
             beta_end=args.beta_end,
-            use_attention=not args.no_attention,
+            schedule_type=args.schedule,
+            attn_resolutions=tuple(args.attn_resolutions),
         )
 
     model = config.to_unet().to(device)
