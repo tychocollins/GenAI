@@ -295,6 +295,63 @@ class NoiseScheduler(nn.Module):
         }
 
 
+class ExponentialMovingAverage:
+    """
+    Maintains an exponential moving average of model parameters.
+    
+    This is useful for stabilizing training and improving sample quality in diffusion models.
+    The shadow parameters are updated as: shadow = decay * shadow + (1 - decay) * param
+    
+    Args:
+        parameters: Iterable of torch.nn.Parameter to track
+        decay: Exponential decay factor (typically 0.999 or 0.9999)
+    """
+    
+    def __init__(self, parameters, decay: float = 0.9999):
+        self.decay = decay
+        self.shadow_params = [p.clone().detach() for p in parameters if p.requires_grad]
+        
+    def update(self, parameters):
+        """Update the shadow parameters with current model parameters."""
+        with torch.no_grad():
+            for shadow, param in zip(self.shadow_params, [p for p in parameters if p.requires_grad]):
+                shadow.sub_((1 - self.decay) * (shadow - param))
+    
+    def copy_to(self, parameters):
+        """Copy shadow parameters to the model parameters."""
+        with torch.no_grad():
+            for shadow, param in zip(self.shadow_params, [p for p in parameters if p.requires_grad]):
+                param.copy_(shadow)
+    
+    def store(self, parameters):
+        """
+        Store the current model parameters.
+        Use this before temporarily copying EMA weights to the model.
+        """
+        self.collected_params = [p.clone().detach() for p in parameters if p.requires_grad]
+    
+    def restore(self, parameters):
+        """
+        Restore previously stored model parameters.
+        Use this after temporarily using EMA weights.
+        """
+        with torch.no_grad():
+            for stored, param in zip(self.collected_params, [p for p in parameters if p.requires_grad]):
+                param.copy_(stored)
+    
+    def state_dict(self):
+        """Return state dict for checkpointing."""
+        return {
+            'decay': self.decay,
+            'shadow_params': self.shadow_params,
+        }
+    
+    def load_state_dict(self, state_dict):
+        """Load state dict from checkpoint."""
+        self.decay = state_dict['decay']
+        self.shadow_params = state_dict['shadow_params']
+
+
 @dataclass
 class DDPMConfig:
     in_channels: int = 3
@@ -338,19 +395,22 @@ def save_ddpm_checkpoint(
     epoch: int,
     step: int,
     config: DDPMConfig,
+    ema: Optional[ExponentialMovingAverage] = None,
 ) -> None:
-    torch.save(
-        {
-            "model_type": "ddpm",
-            "epoch": epoch,
-            "step": step,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "scheduler": scheduler.to_config(),
-            "config": asdict(config),
-        },
-        path,
-    )
+    checkpoint = {
+        "model_type": "ddpm",
+        "epoch": epoch,
+        "step": step,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler": scheduler.to_config(),
+        "config": asdict(config),
+    }
+    
+    if ema is not None:
+        checkpoint["ema_state_dict"] = ema.state_dict()
+    
+    torch.save(checkpoint, path)
 
 
 def load_ddpm_checkpoint(
@@ -358,6 +418,7 @@ def load_ddpm_checkpoint(
     model: nn.Module,
     optimizer: Optional[torch.optim.Optimizer] = None,
     scheduler: Optional[NoiseScheduler] = None,
+    ema: Optional[ExponentialMovingAverage] = None,
     map_location: str | torch.device = "cpu",
 ) -> Dict:
     device = torch.device(map_location)
@@ -379,6 +440,10 @@ def load_ddpm_checkpoint(
             schedule_type=sched_cfg.get("schedule_type", getattr(scheduler, "schedule_type", "linear")),
         )
         scheduler.to(device)
+    
+    if ema is not None and "ema_state_dict" in ckpt:
+        ema.load_state_dict(ckpt["ema_state_dict"])
+    
     return ckpt
 
 
@@ -392,7 +457,16 @@ def load_ddpm_for_inference(path: str, device: torch.device):
     config = DDPMConfig(**ckpt["config"])
     model = config.to_unet().to(device)
     scheduler = config.to_scheduler().to(device)
-    model.load_state_dict(ckpt["model_state_dict"], strict=True)
+    
+    # If EMA weights are available, use them for inference (they're typically better)
+    if "ema_state_dict" in ckpt:
+        ema = ExponentialMovingAverage(model.parameters(), decay=ckpt["ema_state_dict"]["decay"])
+        ema.load_state_dict(ckpt["ema_state_dict"])
+        ema.copy_to(model.parameters())
+        print("[INFO] Loaded EMA weights for inference.")
+    else:
+        model.load_state_dict(ckpt["model_state_dict"], strict=True)
+    
     if "scheduler" in ckpt:
         scheduler.__init__(
             num_train_timesteps=ckpt["scheduler"].get("num_train_timesteps", scheduler.num_train_timesteps),

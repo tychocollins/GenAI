@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torchvision.utils import save_image
 
 from data_loader import get_celeba_loader
-from ddpm import DDPMConfig, save_ddpm_checkpoint, load_ddpm_checkpoint, sample_ddpm
+from ddpm import DDPMConfig, ExponentialMovingAverage, save_ddpm_checkpoint, load_ddpm_checkpoint, sample_ddpm
 from utils import ensure_dir, get_device, seed_everything
 
 
@@ -29,6 +29,9 @@ def add_ddpm_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentPars
     parser.add_argument("--sample-interval", type=int, default=200, help="Steps between saving DDPM samples.")
     parser.add_argument("--sample-batch", type=int, default=8, help="Number of samples to generate per preview.")
     parser.add_argument("--resume", type=str, default=None, help="Path to resume DDPM checkpoint.")
+    parser.add_argument("--use-ema", action="store_true", default=True, help="Use Exponential Moving Average of weights.")
+    parser.add_argument("--no-ema", dest="use_ema", action="store_false", help="Disable EMA.")
+    parser.add_argument("--ema-decay", type=float, default=0.9999, help="EMA decay factor (default: 0.9999).")
     return parser
 
 
@@ -80,12 +83,20 @@ def train_ddpm(args):
     scheduler = config.to_scheduler().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.999))
 
+    # Initialize EMA
+    ema = None
+    if args.use_ema:
+        ema = ExponentialMovingAverage(model.parameters(), decay=args.ema_decay)
+        print(f"[INFO] Initialized EMA with decay={args.ema_decay}")
+
     start_epoch = 1
     global_step = 0
     if args.resume:
-        ckpt = load_ddpm_checkpoint(args.resume, model, optimizer, scheduler, map_location=device)
+        ckpt = load_ddpm_checkpoint(args.resume, model, optimizer, scheduler, ema=ema, map_location=device)
         start_epoch = ckpt.get("epoch", 0) + 1
         global_step = ckpt.get("step", 0)
+        if ema is not None and "ema_state_dict" in ckpt:
+            print(f"[INFO] Resumed EMA state from checkpoint.")
         print(f"[INFO] Resumed from {args.resume} at epoch {start_epoch} step {global_step}.")
 
     loader = get_celeba_loader(
@@ -122,6 +133,10 @@ def train_ddpm(args):
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             optimizer.step()
 
+            # Update EMA after optimizer step
+            if ema is not None:
+                ema.update(model.parameters())
+
             global_step += 1
 
             if global_step % args.log_interval == 0:
@@ -132,7 +147,13 @@ def train_ddpm(args):
             loss_history.append(float(loss.item()))
 
             if global_step % args.sample_interval == 0:
+                model.eval()
                 with torch.no_grad():
+                    # Use EMA weights for sampling if available
+                    if ema is not None:
+                        ema.store(model.parameters())
+                        ema.copy_to(model.parameters())
+                    
                     samples, _ = sample_ddpm(
                         model,
                         scheduler,
@@ -140,6 +161,11 @@ def train_ddpm(args):
                         shape=(3, args.resolution, args.resolution),
                         device=device,
                     )
+                    
+                    # Restore original weights
+                    if ema is not None:
+                        ema.restore(model.parameters())
+                
                 samples = _denorm(samples)
                 grid_cols = max(1, int(math.sqrt(samples.size(0))))
                 sample_path = os.path.join(sample_dir, f"ddpm_step_{global_step:06d}.png")
@@ -152,9 +178,9 @@ def train_ddpm(args):
 
         if epoch % args.save_interval == 0 or epoch == args.epochs:
             ckpt_path = os.path.join(ckpt_dir, f"ddpm_epoch_{epoch}.pt")
-            save_ddpm_checkpoint(ckpt_path, model, optimizer, scheduler, epoch, global_step, config)
+            save_ddpm_checkpoint(ckpt_path, model, optimizer, scheduler, epoch, global_step, config, ema=ema)
             latest_path = os.path.join(args.save_dir, "ddpm_latest.pt")
-            save_ddpm_checkpoint(latest_path, model, optimizer, scheduler, epoch, global_step, config)
+            save_ddpm_checkpoint(latest_path, model, optimizer, scheduler, epoch, global_step, config, ema=ema)
             print(f"[DDPM] Saved checkpoints: {ckpt_path} and {latest_path}")
             torch.save({"losses": loss_history}, log_path)
 
